@@ -40,7 +40,9 @@ api-keys:
 # Enable debug logging
 debug: false
 
-# Enable pprof HTTP debug server (host:port). Keep it bound to localhost for safety.
+# Enable pprof HTTP debug server (host:port).
+# If you enable this, pprof endpoints will be served on a SEPARATE address (pprof.addr), not the main API port.
+# Keep it bound to localhost for safety.
 pprof:
   enable: false
   addr: "127.0.0.1:8316"

@@ -11,7 +11,6 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   ghcr_amd64:
@@ -21,6 +20,12 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Prepare image name (lowercase)
+        id: prep
+        run: |
+          IMAGE="${{ github.repository }}"
+          IMAGE_LOWER=$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -43,8 +48,8 @@ jobs:
             COMMIT=${{ env.COMMIT }}
             BUILD_DATE=${{ env.BUILD_DATE }}
           tags: |
-            ghcr.io/${{ env.IMAGE_NAME }}:latest-amd64
-            ghcr.io/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}-amd64
+            ghcr.io/${{ steps.prep.outputs.image }}:latest-amd64
+            ghcr.io/${{ steps.prep.outputs.image }}:sha-${{ github.sha }}-amd64
 
   ghcr_arm64:
     runs-on: ubuntu-24.04-arm
@@ -53,6 +58,12 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Prepare image name (lowercase)
+        id: prep
+        run: |
+          IMAGE="${{ github.repository }}"
+          IMAGE_LOWER=$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -75,8 +86,8 @@ jobs:
             COMMIT=${{ env.COMMIT }}
             BUILD_DATE=${{ env.BUILD_DATE }}
           tags: |
-            ghcr.io/${{ env.IMAGE_NAME }}:latest-arm64
-            ghcr.io/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}-arm64
+            ghcr.io/${{ steps.prep.outputs.image }}:latest-arm64
+            ghcr.io/${{ steps.prep.outputs.image }}:sha-${{ github.sha }}-arm64
 
   ghcr_manifest:
     runs-on: ubuntu-latest
@@ -88,6 +99,12 @@ jobs:
         uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Prepare image name (lowercase)
+        id: prep
+        run: |
+          IMAGE="${{ github.repository }}"
+          IMAGE_LOWER=$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${IMAGE_LOWER}" >> "$GITHUB_OUTPUT"
       - name: Login to GHCR
         uses: docker/login-action@v3
         with:
@@ -95,15 +112,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Create and push multi-arch manifests
-        env:
-          IMAGE_NAME: ${{ github.repository }}
         run: |
-          IMAGE_NAME_LOWER=$(echo "ghcr.io/${IMAGE_NAME}" | tr '[:upper:]' '[:lower:]')
           docker buildx imagetools create \
-            --tag "${IMAGE_NAME_LOWER}:latest" \
-            "${IMAGE_NAME_LOWER}:latest-amd64" \
-            "${IMAGE_NAME_LOWER}:latest-arm64"
+            --tag "ghcr.io/${{ steps.prep.outputs.image }}:latest" \
+            "ghcr.io/${{ steps.prep.outputs.image }}:latest-amd64" \
+            "ghcr.io/${{ steps.prep.outputs.image }}:latest-arm64"
           docker buildx imagetools create \
-            --tag "${IMAGE_NAME_LOWER}:sha-${{ github.sha }}" \
-            "${IMAGE_NAME_LOWER}:sha-${{ github.sha }}-amd64" \
-            "${IMAGE_NAME_LOWER}:sha-${{ github.sha }}-arm64"
+            --tag "ghcr.io/${{ steps.prep.outputs.image }}:sha-${{ github.sha }}" \
+            "ghcr.io/${{ steps.prep.outputs.image }}:sha-${{ github.sha }}-amd64" \
+            "ghcr.io/${{ steps.prep.outputs.image }}:sha-${{ github.sha }}-arm64"

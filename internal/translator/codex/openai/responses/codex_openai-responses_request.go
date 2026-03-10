@@ -65,13 +65,23 @@ func convertSystemRoleToDeveloper(rawJSON []byte) []byte {
 	}
 
 	inputArray := inputResult.Array()
-	result := rawJSON
-
-	// Directly modify role values for items with "system" role
+	needChange := false
 	for i := 0; i < len(inputArray); i++ {
-		rolePath := fmt.Sprintf("input.%d.role", i)
-		if gjson.GetBytes(result, rolePath).String() == "system" {
-			result, _ = sjson.SetBytes(result, rolePath, "developer")
+		role := inputArray[i].Get("role")
+		if role.Type == gjson.String && role.Str == "system" {
+			needChange = true
+			break
+		}
+	}
+	if !needChange {
+		return rawJSON
+	}
+
+	result := rawJSON
+	for i := 0; i < len(inputArray); i++ {
+		role := inputArray[i].Get("role")
+		if role.Type == gjson.String && role.Str == "system" {
+			result, _ = sjson.SetBytes(result, fmt.Sprintf("input.%d.role", i), "developer")
 		}
 	}
 

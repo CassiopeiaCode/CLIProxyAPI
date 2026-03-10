@@ -1,10 +1,66 @@
 package responses
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/tidwall/gjson"
 )
+
+func TestConvertSystemRoleToDeveloper_InputNotArray(t *testing.T) {
+	testCases := []struct {
+		name string
+		json []byte
+	}{
+		{name: "absent", json: []byte(`{"model":"gpt-5.2"}`)},
+		{name: "string", json: []byte(`{"model":"gpt-5.2","input":"hello"}`)},
+		{name: "object", json: []byte(`{"model":"gpt-5.2","input":{"role":"system"}}`)},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			output := convertSystemRoleToDeveloper(tc.json)
+			if !bytes.Equal(output, tc.json) {
+				t.Fatalf("expected unchanged bytes, got %s", string(output))
+			}
+		})
+	}
+}
+
+func TestConvertSystemRoleToDeveloper_NoSystemRoleKeepsBytes(t *testing.T) {
+	inputJSON := []byte(`{"model":"gpt-5.2","input":[{"role":"user","content":"hello"},{"role":"assistant","content":"hi"},{"content":"missing role"},{"role":123}]}`)
+
+	output := convertSystemRoleToDeveloper(inputJSON)
+	if !bytes.Equal(output, inputJSON) {
+		t.Fatalf("expected unchanged bytes, got %s", string(output))
+	}
+}
+
+func TestConvertSystemRoleToDeveloper_SystemRoleOnlyChangesRole(t *testing.T) {
+	inputJSON := []byte(`{"model":"gpt-5.2","input":[{"role":"system","content":{"text":"rule"},"extra":1},{"role":"user","content":"hello"},{"content":"missing role"},{"role":123}]}`)
+
+	output := convertSystemRoleToDeveloper(inputJSON)
+	outputStr := string(output)
+
+	if got := gjson.Get(outputStr, "input.0.role").String(); got != "developer" {
+		t.Fatalf("expected input.0.role=developer, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "input.0.content.text").String(); got != "rule" {
+		t.Fatalf("expected input.0.content.text preserved, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "input.0.extra").Int(); got != 1 {
+		t.Fatalf("expected input.0.extra preserved, got %d", got)
+	}
+	if got := gjson.Get(outputStr, "input.1.role").String(); got != "user" {
+		t.Fatalf("expected input.1.role=user, got %q", got)
+	}
+	if gjson.Get(outputStr, "input.2.role").Exists() {
+		t.Fatalf("expected input.2.role to remain absent")
+	}
+	if got := gjson.Get(outputStr, "input.3.role").Raw; got != "123" {
+		t.Fatalf("expected numeric role preserved, got %s", got)
+	}
+}
 
 // TestConvertSystemRoleToDeveloper_BasicConversion tests the basic system -> developer role conversion
 func TestConvertSystemRoleToDeveloper_BasicConversion(t *testing.T) {

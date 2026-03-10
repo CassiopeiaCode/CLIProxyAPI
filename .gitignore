@@ -38,6 +38,7 @@ GEMINI.md
 .gemini/*
 .gocache/*
 .gomodcache/*
+.gopath/*
 .serena/*
 .agent/*
 .agents/*

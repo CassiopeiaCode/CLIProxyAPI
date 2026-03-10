@@ -33,16 +33,18 @@ GEMINI.md
 
 # Tooling metadata
 .vscode/*
-.worktrees/
 .codex/*
 .claude/*
 .gemini/*
+.gocache/*
+.gomodcache/*
+.gopath/*
 .serena/*
 .agent/*
 .agents/*
+.agents/*
 .opencode/*
 .idea/*
-.beads/*
 .bmad/*
 _bmad/*
 _bmad-output/*

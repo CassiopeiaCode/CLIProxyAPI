@@ -1,6 +1,8 @@
 package responses
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
@@ -9,40 +11,122 @@ import (
 )
 
 func ConvertOpenAIResponsesRequestToCodex(modelName string, inputRawJSON []byte, _ bool) []byte {
-	rawJSON := inputRawJSON
+	_ = modelName
 
-	inputResult := gjson.GetBytes(rawJSON, "input")
-	if inputResult.Type == gjson.String {
-		input, _ := sjson.SetBytes([]byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}]`), "0.content.0.text", inputResult.String())
-		rawJSON, _ = sjson.SetRawBytes(rawJSON, "input", input)
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(inputRawJSON, &m); err != nil {
+		return inputRawJSON
 	}
 
-	rawJSON, _ = sjson.SetBytes(rawJSON, "stream", true)
-	rawJSON, _ = sjson.SetBytes(rawJSON, "store", false)
-	rawJSON, _ = sjson.SetBytes(rawJSON, "parallel_tool_calls", true)
-	rawJSON, _ = sjson.SetBytes(rawJSON, "include", []string{"reasoning.encrypted_content"})
-	// Codex Responses rejects token limit fields, so strip them out before forwarding.
-	rawJSON, _ = sjson.DeleteBytes(rawJSON, "max_output_tokens")
-	rawJSON, _ = sjson.DeleteBytes(rawJSON, "max_completion_tokens")
-	rawJSON, _ = sjson.DeleteBytes(rawJSON, "temperature")
-	rawJSON, _ = sjson.DeleteBytes(rawJSON, "top_p")
-	if v := gjson.GetBytes(rawJSON, "service_tier"); v.Exists() {
-		if v.String() != "priority" {
-			rawJSON, _ = sjson.DeleteBytes(rawJSON, "service_tier")
+	if inputRaw, ok := m["input"]; ok {
+		trimmed := bytes.TrimSpace(inputRaw)
+		if len(trimmed) > 0 {
+			switch trimmed[0] {
+			case '"':
+				var s string
+				if err := json.Unmarshal(trimmed, &s); err == nil {
+					wrapped, err := json.Marshal([]codexInputMessage{{
+						Type: "message",
+						Role: "user",
+						Content: []codexInputContent{
+							{Type: "input_text", Text: s},
+						},
+					}})
+					if err == nil {
+						m["input"] = wrapped
+					}
+				}
+			case '[':
+				if rewritten, changed := rewriteInputArraySystemRole(trimmed); changed {
+					m["input"] = rewritten
+				}
+			}
 		}
 	}
 
-	rawJSON, _ = sjson.DeleteBytes(rawJSON, "truncation")
-	rawJSON = applyResponsesCompactionCompatibility(rawJSON)
+	m["stream"] = json.RawMessage("true")
+	m["store"] = json.RawMessage("false")
+	m["parallel_tool_calls"] = json.RawMessage("true")
+	m["include"] = json.RawMessage(`["reasoning.encrypted_content"]`)
 
-	// Delete the user field as it is not supported by the Codex upstream.
-	rawJSON, _ = sjson.DeleteBytes(rawJSON, "user")
+	delete(m, "max_output_tokens")
+	delete(m, "max_completion_tokens")
+	delete(m, "temperature")
+	delete(m, "top_p")
+	delete(m, "truncation")
+	delete(m, "user")
+	delete(m, "context_management")
+	// Keep service_tier only when explicitly "priority".
+	if raw, ok := m["service_tier"]; ok {
+		var tier string
+		if err := json.Unmarshal(raw, &tier); err != nil || tier != "priority" {
+			delete(m, "service_tier")
+		}
+	}
 
-	// Convert role "system" to "developer" in input array to comply with Codex API requirements.
-	rawJSON = convertSystemRoleToDeveloper(rawJSON)
-	rawJSON = normalizeCodexBuiltinTools(rawJSON)
+	out, err := json.Marshal(m)
+	if err != nil {
+		return inputRawJSON
+	}
 
-	return rawJSON
+	// Preserve additional compatibility behavior present in the legacy pipeline.
+	out = normalizeCodexBuiltinTools(out)
+	out = applyResponsesCompactionCompatibility(out)
+	return out
+}
+
+type codexInputContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type codexInputMessage struct {
+	Type    string              `json:"type"`
+	Role    string              `json:"role"`
+	Content []codexInputContent `json:"content"`
+}
+
+func rewriteInputArraySystemRole(inputRaw json.RawMessage) (json.RawMessage, bool) {
+	var elems []json.RawMessage
+	if err := json.Unmarshal(inputRaw, &elems); err != nil {
+		return inputRaw, false
+	}
+
+	changed := false
+	for i, elem := range elems {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal(elem, &obj); err != nil {
+			continue
+		}
+		roleRaw, ok := obj["role"]
+		if !ok {
+			continue
+		}
+		var role string
+		if err := json.Unmarshal(roleRaw, &role); err != nil {
+			continue
+		}
+		if role != "system" {
+			continue
+		}
+
+		obj["role"] = json.RawMessage(`"developer"`)
+		newElem, err := json.Marshal(obj)
+		if err != nil {
+			continue
+		}
+		elems[i] = newElem
+		changed = true
+	}
+
+	if !changed {
+		return inputRaw, false
+	}
+	out, err := json.Marshal(elems)
+	if err != nil {
+		return inputRaw, false
+	}
+	return out, true
 }
 
 // applyResponsesCompactionCompatibility handles OpenAI Responses context_management.compaction

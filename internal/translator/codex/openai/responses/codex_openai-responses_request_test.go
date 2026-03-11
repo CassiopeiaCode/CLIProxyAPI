@@ -420,3 +420,92 @@ func TestTruncationRemovedForCodexCompatibility(t *testing.T) {
 		t.Fatalf("truncation should be removed for Codex compatibility")
 	}
 }
+
+func TestConvertOpenAIResponsesRequestToCodex_InputStringWrapped(t *testing.T) {
+	inputJSON := []byte(`{
+		"model": "gpt-5.2",
+		"input": "hello from string"
+	}`)
+
+	output := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
+	outputStr := string(output)
+
+	if !gjson.Get(outputStr, "input").IsArray() {
+		t.Fatalf("expected input to be wrapped as array, got %s", gjson.Get(outputStr, "input").Raw)
+	}
+	if got := gjson.Get(outputStr, "input.0.type").String(); got != "message" {
+		t.Fatalf("expected input.0.type=message, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "input.0.role").String(); got != "user" {
+		t.Fatalf("expected input.0.role=user, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "input.0.content.0.type").String(); got != "input_text" {
+		t.Fatalf("expected input.0.content.0.type=input_text, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "input.0.content.0.text").String(); got != "hello from string" {
+		t.Fatalf("expected wrapped text preserved, got %q", got)
+	}
+}
+
+func TestConvertOpenAIResponsesRequestToCodex_InputArraySystemRoleConvertedAndUnknownFieldsPreserved(t *testing.T) {
+	inputJSON := []byte(`{
+		"model": "gpt-5.2",
+		"foo": {"bar": {"baz": 123}},
+		"input": [
+			{"role": "system", "content": {"text": "rule"}, "extra": 1, "nested": {"x": true}},
+			{"role": "user", "content": "hello"}
+		]
+	}`)
+
+	output := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
+	outputStr := string(output)
+
+	if got := gjson.Get(outputStr, "foo.bar.baz").Int(); got != 123 {
+		t.Fatalf("expected unknown field foo.bar.baz preserved, got %d", got)
+	}
+
+	if got := gjson.Get(outputStr, "input.0.role").String(); got != "developer" {
+		t.Fatalf("expected input.0.role=developer, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "input.0.content.text").String(); got != "rule" {
+		t.Fatalf("expected input.0.content.text preserved, got %q", got)
+	}
+	if got := gjson.Get(outputStr, "input.0.extra").Int(); got != 1 {
+		t.Fatalf("expected input.0.extra preserved, got %d", got)
+	}
+	if got := gjson.Get(outputStr, "input.0.nested.x").Bool(); got != true {
+		t.Fatalf("expected input.0.nested.x preserved, got %v", got)
+	}
+	if got := gjson.Get(outputStr, "input.1.role").String(); got != "user" {
+		t.Fatalf("expected input.1.role=user, got %q", got)
+	}
+}
+
+func TestConvertOpenAIResponsesRequestToCodex_RemovesTokenLimitAndUserAndContextManagement(t *testing.T) {
+	inputJSON := []byte(`{
+		"model": "gpt-5.2",
+		"user": "u-123",
+		"max_output_tokens": 42,
+		"max_completion_tokens": 43,
+		"temperature": 0.7,
+		"top_p": 0.9,
+		"context_management": [{"type": "compaction"}],
+		"input": [{"role":"user","content":"hello"}]
+	}`)
+
+	output := ConvertOpenAIResponsesRequestToCodex("gpt-5.2", inputJSON, false)
+	outputStr := string(output)
+
+	for _, path := range []string{
+		"user",
+		"max_output_tokens",
+		"max_completion_tokens",
+		"temperature",
+		"top_p",
+		"context_management",
+	} {
+		if gjson.Get(outputStr, path).Exists() {
+			t.Fatalf("expected %s to be removed, got %s", path, gjson.Get(outputStr, path).Raw)
+		}
+	}
+}

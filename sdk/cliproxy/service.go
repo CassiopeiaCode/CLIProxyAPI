@@ -634,6 +634,8 @@ func (s *Service) Run(ctx context.Context) error {
 			switch strategy {
 			case "fill-first", "fillfirst", "ff":
 				return "fill-first"
+			case "success-rate", "successrate", "sr":
+				return "success-rate"
 			default:
 				return "round-robin"
 			}
@@ -653,6 +655,8 @@ func (s *Service) Run(ctx context.Context) error {
 			switch nextStrategy {
 			case "fill-first":
 				selector = &coreauth.FillFirstSelector{}
+			case "success-rate":
+				selector = coreauth.NewSuccessRateSelector(newCfg.Routing.SuccessRate.HalfLifeSeconds, newCfg.Routing.SuccessRate.ExploreRate)
 			default:
 				selector = &coreauth.RoundRobinSelector{}
 			}

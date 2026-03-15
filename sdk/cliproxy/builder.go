@@ -225,6 +225,8 @@ func (b *Builder) Build() (*Service, error) {
 		switch strategy {
 		case "fill-first", "fillfirst", "ff":
 			selector = &coreauth.FillFirstSelector{}
+		case "success-rate", "successrate", "sr":
+			selector = coreauth.NewSuccessRateSelector(b.cfg.Routing.SuccessRate.HalfLifeSeconds, b.cfg.Routing.SuccessRate.ExploreRate)
 		default:
 			selector = &coreauth.RoundRobinSelector{}
 		}

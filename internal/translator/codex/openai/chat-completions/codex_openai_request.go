@@ -17,12 +17,12 @@ import (
 // ---------------------------------------------------------------------------
 
 type chatReqInput struct {
-	ReasoningEffort string            `json:"reasoning_effort"`
-	Messages        []chatMessage     `json:"messages"`
-	Tools           []chatTool        `json:"tools"`
-	ToolChoice      json.RawMessage   `json:"tool_choice"`
-	ResponseFormat  *chatRespFormat   `json:"response_format"`
-	Text            *chatTextCfg      `json:"text"`
+	ReasoningEffort string          `json:"reasoning_effort"`
+	Messages        []chatMessage   `json:"messages"`
+	Tools           []chatTool      `json:"tools"`
+	ToolChoice      json.RawMessage `json:"tool_choice"`
+	ResponseFormat  *chatRespFormat `json:"response_format"`
+	Text            *chatTextCfg    `json:"text"`
 }
 
 type chatMessage struct {
@@ -33,8 +33,8 @@ type chatMessage struct {
 }
 
 type chatTool struct {
-	Type     string           `json:"type"`
-	Function *chatToolFunc    `json:"function"`
+	Type     string        `json:"type"`
+	Function *chatToolFunc `json:"function"`
 	// everything else kept as raw so we can pass it through untouched
 	Raw json.RawMessage `json:"-"`
 }
@@ -68,8 +68,8 @@ type chatToolCall struct {
 }
 
 type chatRespFormat struct {
-	Type       string             `json:"type"`
-	JSONSchema *chatJSONSchema    `json:"json_schema"`
+	Type       string          `json:"type"`
+	JSONSchema *chatJSONSchema `json:"json_schema"`
 }
 
 type chatJSONSchema struct {
@@ -80,6 +80,22 @@ type chatJSONSchema struct {
 
 type chatTextCfg struct {
 	Verbosity json.RawMessage `json:"verbosity"`
+}
+
+type chatContentPart struct {
+	Type     string               `json:"type"`
+	Text     string               `json:"text"`
+	ImageURL *chatContentImageURL `json:"image_url"`
+	File     *chatContentFile     `json:"file"`
+}
+
+type chatContentImageURL struct {
+	URL string `json:"url"`
+}
+
+type chatContentFile struct {
+	FileData string `json:"file_data"`
+	Filename string `json:"filename"`
 }
 
 // ---------------------------------------------------------------------------
@@ -115,12 +131,12 @@ func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream b
 	// Build output map
 	// ------------------------------------------------------------------
 	out := map[string]any{
-		"instructions": "",
-		"stream":       stream,
+		"instructions":        "",
+		"stream":              stream,
 		"parallel_tool_calls": true,
-		"include": []string{"reasoning.encrypted_content"},
-		"model":  modelName,
-		"store":  false,
+		"include":             []string{"reasoning.encrypted_content"},
+		"model":               modelName,
+		"store":               false,
 	}
 
 	// reasoning
@@ -313,74 +329,80 @@ func buildContentParts(role string, raw json.RawMessage) []any {
 		return parts
 	}
 
-	// Try string first
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		if s != "" {
-			partType := "input_text"
-			if role == "assistant" {
-				partType = "output_text"
-			}
-			parts = append(parts, map[string]any{
-				"type": partType,
-				"text": s,
-			})
+	first := firstNonSpaceByte(raw)
+	switch first {
+	case '"':
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return parts
 		}
+		if s == "" {
+			return parts
+		}
+		partType := "input_text"
+		if role == "assistant" {
+			partType = "output_text"
+		}
+		parts = append(parts, map[string]any{
+			"type": partType,
+			"text": s,
+		})
+		return parts
+	case '[':
+	default:
 		return parts
 	}
 
-	// Try array
-	var arr []json.RawMessage
+	var arr []chatContentPart
 	if err := json.Unmarshal(raw, &arr); err != nil {
 		return parts
 	}
 	for _, item := range arr {
-		var obj map[string]any
-		if err := json.Unmarshal(item, &obj); err != nil {
-			continue
-		}
-		t, _ := obj["type"].(string)
-		switch t {
+		switch item.Type {
 		case "text":
 			partType := "input_text"
 			if role == "assistant" {
 				partType = "output_text"
 			}
-			text, _ := obj["text"].(string)
 			parts = append(parts, map[string]any{
 				"type": partType,
-				"text": text,
+				"text": item.Text,
 			})
 		case "image_url":
-			if role == "user" {
+			if role == "user" && item.ImageURL != nil && item.ImageURL.URL != "" {
 				part := map[string]any{"type": "input_image"}
-				if iu, ok := obj["image_url"].(map[string]any); ok {
-					if u, ok2 := iu["url"].(string); ok2 {
-						part["image_url"] = u
-					}
-				}
+				part["image_url"] = item.ImageURL.URL
 				parts = append(parts, part)
 			}
 		case "file":
-			if role == "user" {
-				if f, ok := obj["file"].(map[string]any); ok {
-					fileData, _ := f["file_data"].(string)
-					if fileData == "" {
-						continue
-					}
-					part := map[string]any{
-						"type":      "input_file",
-						"file_data": fileData,
-					}
-					if filename, ok2 := f["filename"].(string); ok2 && filename != "" {
-						part["filename"] = filename
-					}
-					parts = append(parts, part)
+			if role == "user" && item.File != nil {
+				if item.File.FileData == "" {
+					continue
 				}
+				part := map[string]any{
+					"type":      "input_file",
+					"file_data": item.File.FileData,
+				}
+				if item.File.Filename != "" {
+					part["filename"] = item.File.Filename
+				}
+				parts = append(parts, part)
 			}
 		}
 	}
 	return parts
+}
+
+func firstNonSpaceByte(raw json.RawMessage) byte {
+	for _, b := range raw {
+		switch b {
+		case ' ', '\n', '\r', '\t':
+			continue
+		default:
+			return b
+		}
+	}
+	return 0
 }
 
 func buildTextObject(rf *chatRespFormat, tc *chatTextCfg) map[string]any {

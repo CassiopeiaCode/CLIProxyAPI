@@ -2,19 +2,57 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"math/bits"
-	"strings"
 	"sync"
 	"time"
 
+	internalconfig "github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
 )
 
+const (
+	defaultSimHashPoolSize            = 10
+	defaultSimHashAdmitCooldownSecond = 1
+)
+
+type simHashPoolState struct {
+	members        map[string]struct{}
+	everFilled     bool
+	lastAdmittedAt time.Time
+}
+
 // SimHashSelector routes requests to the nearest available auth by request SimHash.
 type SimHashSelector struct {
-	mu      sync.Mutex
-	cursors map[string]int
-	maxKeys int
+	mu            sync.Mutex
+	pool          simHashPoolState
+	cursors       map[string]int
+	maxKeys       int
+	poolSize      int
+	admitCooldown time.Duration
+}
+
+func NewSimHashSelector(cfg internalconfig.RoutingSimHashConfig) *SimHashSelector {
+	selector := &SimHashSelector{}
+	selector.SetConfig(cfg)
+	return selector
+}
+
+func (s *SimHashSelector) SetConfig(cfg internalconfig.RoutingSimHashConfig) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.poolSize = cfg.PoolSize
+	if s.poolSize <= 0 {
+		s.poolSize = defaultSimHashPoolSize
+	}
+	cooldownSeconds := cfg.AdmitCooldownSeconds
+	if cooldownSeconds <= 0 {
+		cooldownSeconds = defaultSimHashAdmitCooldownSecond
+	}
+	s.admitCooldown = time.Duration(cooldownSeconds) * time.Second
+	if s.pool.members == nil {
+		s.pool.members = make(map[string]struct{})
+	}
 }
 
 func (s *SimHashSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
@@ -28,42 +66,132 @@ func (s *SimHashSelector) Pick(ctx context.Context, provider, model string, opts
 		return available[0], nil
 	}
 
-	cold := make([]*Auth, 0, len(available))
-	for _, candidate := range available {
-		if candidate != nil && !candidate.HasLastRequestSimHash {
-			cold = append(cold, candidate)
-		}
+	s.mu.Lock()
+	if s.pool.members == nil {
+		s.pool.members = make(map[string]struct{})
 	}
-	if len(cold) > 0 {
-		return s.pickColdStart(provider, model, cold), nil
+	s.prunePoolLocked(auths, now)
+	poolMembers, outsiders := s.partitionAvailableLocked(available)
+
+	if len(s.pool.members) < s.effectivePoolSizeLocked() && len(outsiders) > 0 {
+		admitted := s.pickRoundRobinLocked("simhash:admit", outsiders)
+		if admitted != nil {
+			s.pool.members[admitted.ID] = struct{}{}
+			s.pool.lastAdmittedAt = now
+			if len(s.pool.members) >= s.effectivePoolSizeLocked() {
+				s.pool.everFilled = true
+			}
+			s.mu.Unlock()
+			return admitted, nil
+		}
 	}
 
-	requestHash, ok := requestSimHashFromMetadata(opts.Metadata)
-	if !ok {
-		return s.pickColdStart(provider, model, available), nil
-	}
-	best := available[0]
-	bestDistance := bits.OnesCount64(best.LastRequestSimHash ^ requestHash)
-	for _, candidate := range available[1:] {
-		distance := bits.OnesCount64(candidate.LastRequestSimHash ^ requestHash)
-		if distance < bestDistance || (distance == bestDistance && candidate.ID < best.ID) {
-			best = candidate
-			bestDistance = distance
+	if len(poolMembers) == 0 && len(outsiders) > 0 && (!s.pool.everFilled || now.Sub(s.pool.lastAdmittedAt) >= s.admitCooldownLocked()) {
+		admitted := s.pickRoundRobinLocked("simhash:admit", outsiders)
+		if admitted != nil {
+			s.pool.members[admitted.ID] = struct{}{}
+			s.pool.lastAdmittedAt = now
+			s.mu.Unlock()
+			return admitted, nil
 		}
 	}
-	return best, nil
+
+	candidates := poolMembers
+	s.mu.Unlock()
+	if len(candidates) == 0 {
+		return nil, &Error{Code: "auth_not_found", Message: "no auth available in simhash pool"}
+	}
+	return s.pickBestCandidate(model, opts, candidates), nil
 }
 
-func (s *SimHashSelector) pickColdStart(provider, model string, auths []*Auth) *Auth {
+func (s *SimHashSelector) pickBestCandidate(model string, opts cliproxyexecutor.Options, auths []*Auth) *Auth {
 	if len(auths) == 0 {
 		return nil
 	}
 	if len(auths) == 1 {
 		return auths[0]
 	}
-	key := strings.ToLower(strings.TrimSpace(provider)) + ":" + canonicalModelKey(model)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	warm := make([]*Auth, 0, len(auths))
+	cold := make([]*Auth, 0, len(auths))
+	for _, auth := range auths {
+		if auth == nil {
+			continue
+		}
+		if auth.HasLastRequestSimHash {
+			warm = append(warm, auth)
+		} else {
+			cold = append(cold, auth)
+		}
+	}
+	if len(warm) == 0 {
+		s.mu.Lock()
+		selected := s.pickRoundRobinLocked("simhash:cold", cold)
+		s.mu.Unlock()
+		return selected
+	}
+	requestHash, ok := requestSimHashFromMetadata(opts.Metadata)
+	if !ok {
+		s.mu.Lock()
+		selected := s.pickRoundRobinLocked("simhash:warm-nohash", warm)
+		s.mu.Unlock()
+		return selected
+	}
+	best := warm[0]
+	bestDistance := bits.OnesCount64(best.LastRequestSimHash ^ requestHash)
+	for _, candidate := range warm[1:] {
+		distance := bits.OnesCount64(candidate.LastRequestSimHash ^ requestHash)
+		if distance < bestDistance || (distance == bestDistance && candidate.ID < best.ID) {
+			best = candidate
+			bestDistance = distance
+		}
+	}
+	return best
+}
+
+func (s *SimHashSelector) prunePoolLocked(allAuths []*Auth, now time.Time) {
+	if len(s.pool.members) == 0 {
+		return
+	}
+	globallyAvailableIDs := make(map[string]struct{}, len(allAuths))
+	for _, auth := range allAuths {
+		if auth == nil {
+			continue
+		}
+		if blocked, _, _ := isAuthBlockedForModel(auth, "", now); blocked {
+			continue
+		}
+		globallyAvailableIDs[auth.ID] = struct{}{}
+	}
+	for authID := range s.pool.members {
+		if _, ok := globallyAvailableIDs[authID]; !ok {
+			delete(s.pool.members, authID)
+		}
+	}
+}
+
+func (s *SimHashSelector) partitionAvailableLocked(available []*Auth) ([]*Auth, []*Auth) {
+	members := make([]*Auth, 0, len(available))
+	outsiders := make([]*Auth, 0, len(available))
+	for _, auth := range available {
+		if auth == nil {
+			continue
+		}
+		if _, ok := s.pool.members[auth.ID]; ok {
+			members = append(members, auth)
+		} else {
+			outsiders = append(outsiders, auth)
+		}
+	}
+	return members, outsiders
+}
+
+func (s *SimHashSelector) pickRoundRobinLocked(key string, auths []*Auth) *Auth {
+	if len(auths) == 0 {
+		return nil
+	}
+	if len(auths) == 1 {
+		return auths[0]
+	}
 	if s.cursors == nil {
 		s.cursors = make(map[string]int)
 	}
@@ -80,4 +208,24 @@ func (s *SimHashSelector) pickColdStart(provider, model string, auths []*Auth) *
 	}
 	s.cursors[key] = index + 1
 	return auths[index%len(auths)]
+}
+
+func (s *SimHashSelector) effectivePoolSizeLocked() int {
+	if s.poolSize <= 0 {
+		return defaultSimHashPoolSize
+	}
+	return s.poolSize
+}
+
+func (s *SimHashSelector) admitCooldownLocked() time.Duration {
+	if s.admitCooldown <= 0 {
+		return time.Duration(defaultSimHashAdmitCooldownSecond) * time.Second
+	}
+	return s.admitCooldown
+}
+
+func (s *SimHashSelector) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fmt.Sprintf("SimHashSelector(pool=%d,members=%d,everFilled=%v)", s.effectivePoolSizeLocked(), len(s.pool.members), s.pool.everFilled)
 }

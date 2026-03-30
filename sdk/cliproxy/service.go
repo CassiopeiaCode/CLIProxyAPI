@@ -660,7 +660,7 @@ func (s *Service) Run(ctx context.Context) error {
 			case "success-rate":
 				selector = coreauth.NewSuccessRateSelector(newCfg.Routing.SuccessRate.HalfLifeSeconds, newCfg.Routing.SuccessRate.ExploreRate)
 			case "simhash":
-				selector = &coreauth.SimHashSelector{}
+				selector = coreauth.NewSimHashSelector(newCfg.Routing.SimHash)
 			default:
 				selector = &coreauth.RoundRobinSelector{}
 			}
@@ -679,6 +679,10 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 
 			s.coreManager.SetSelector(selector)
+		} else if s.coreManager != nil && nextStrategy == "simhash" {
+			if selector, ok := s.coreManager.Selector().(*coreauth.SimHashSelector); ok && selector != nil {
+				selector.SetConfig(newCfg.Routing.SimHash)
+			}
 		}
 
 		s.applyRetryConfig(newCfg)

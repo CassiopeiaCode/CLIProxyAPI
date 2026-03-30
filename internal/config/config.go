@@ -182,6 +182,9 @@ type RoutingConfig struct {
 
 	// SuccessRate configures the "success-rate" routing strategy.
 	SuccessRate RoutingSuccessRateConfig `yaml:"success-rate" json:"success-rate"`
+
+	// SimHash configures the simhash selector virtual pool behavior.
+	SimHash RoutingSimHashConfig `yaml:"simhash" json:"simhash"`
 }
 
 // RoutingSuccessRateConfig configures the success-rate selector.
@@ -192,6 +195,15 @@ type RoutingSuccessRateConfig struct {
 	// ExploreRate is the probability [0,1] of randomly exploring an auth candidate.
 	// Default: 0.02.
 	ExploreRate float64 `yaml:"explore-rate" json:"explore-rate"`
+}
+
+// RoutingSimHashConfig configures the simhash selector virtual pool behavior.
+type RoutingSimHashConfig struct {
+	// PoolSize defines the global virtual pool target size. Default: 10.
+	PoolSize int `yaml:"pool-size" json:"pool-size"`
+	// AdmitCooldownSeconds defines the minimum interval between admitting new available auths
+	// into the virtual pool after the pool has been filled at least once. Default: 1.
+	AdmitCooldownSeconds int `yaml:"admit-cooldown-seconds" json:"admit-cooldown-seconds"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.

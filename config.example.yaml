@@ -107,6 +107,9 @@ routing:
   # success-rate:
   #   half-life-seconds: 1800 # EMA half-life for success rate scoring (default: 1800)
   #   explore-rate: 0.02      # Probability [0,1] to randomly explore a credential (default: 0.02)
+  # simhash:
+  #   pool-size: 10               # Global virtual pool size for simhash routing
+  #   admit-cooldown-seconds: 1   # After the pool has filled once, limit how often a new available auth may enter it
 
 # When true, enable authentication for the WebSocket API (/v1/ws).
 ws-auth: false

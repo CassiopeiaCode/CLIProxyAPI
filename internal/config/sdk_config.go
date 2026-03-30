@@ -17,6 +17,9 @@ type SDKConfig struct {
 	// RequestLog enables or disables detailed request logging functionality.
 	RequestLog bool `yaml:"request-log" json:"request-log"`
 
+	// RequestAudit emits per-attempt request/response audit events to an external hook.
+	RequestAudit RequestAuditConfig `yaml:"request-audit" json:"request-audit"`
+
 	// APIKeys is a list of keys for authenticating clients to this proxy server.
 	APIKeys []string `yaml:"api-keys" json:"api-keys"`
 
@@ -30,6 +33,32 @@ type SDKConfig struct {
 	// NonStreamKeepAliveInterval controls how often blank lines are emitted for non-streaming responses.
 	// <= 0 disables keep-alives. Value is in seconds.
 	NonStreamKeepAliveInterval int `yaml:"nonstream-keepalive-interval,omitempty" json:"nonstream-keepalive-interval,omitempty"`
+}
+
+// RequestAuditConfig controls asynchronous request audit emission for external analysis.
+type RequestAuditConfig struct {
+	// Enable toggles audit event emission.
+	Enable bool `yaml:"enable" json:"enable"`
+
+	// Endpoint is the destination for JSON POST events.
+	// Supported values:
+	//   - http://host/path
+	//   - https://host/path
+	//   - unix:///absolute/path.sock
+	Endpoint string `yaml:"endpoint" json:"endpoint"`
+
+	// Providers limits audit emission to the listed provider identifiers.
+	// Empty means all providers.
+	Providers []string `yaml:"providers,omitempty" json:"providers,omitempty"`
+
+	// QueueSize is the async in-memory queue length. Default: 256.
+	QueueSize int `yaml:"queue-size,omitempty" json:"queue-size,omitempty"`
+
+	// TimeoutSeconds is the per-delivery timeout. Default: 5.
+	TimeoutSeconds int `yaml:"timeout-seconds,omitempty" json:"timeout-seconds,omitempty"`
+
+	// MaxBodyBytes truncates request/response bodies captured in audit events. Default: 262144 (256 KiB).
+	MaxBodyBytes int `yaml:"max-body-bytes,omitempty" json:"max-body-bytes,omitempty"`
 }
 
 // StreamingConfig holds server streaming behavior configuration.

@@ -636,6 +636,8 @@ func (s *Service) Run(ctx context.Context) error {
 				return "fill-first"
 			case "success-rate", "successrate", "sr":
 				return "success-rate"
+			case "simhash", "sh":
+				return "simhash"
 			default:
 				return "round-robin"
 			}
@@ -657,6 +659,8 @@ func (s *Service) Run(ctx context.Context) error {
 				selector = &coreauth.FillFirstSelector{}
 			case "success-rate":
 				selector = coreauth.NewSuccessRateSelector(newCfg.Routing.SuccessRate.HalfLifeSeconds, newCfg.Routing.SuccessRate.ExploreRate)
+			case "simhash":
+				selector = &coreauth.SimHashSelector{}
 			default:
 				selector = &coreauth.RoundRobinSelector{}
 			}

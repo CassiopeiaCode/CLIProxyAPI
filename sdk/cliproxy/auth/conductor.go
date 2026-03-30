@@ -104,6 +104,10 @@ type Result struct {
 	RetryAfter *time.Duration
 	// Error describes the failure when Success is false.
 	Error *Error
+	// RequestSimHash stores the request SimHash when simhash routing is active.
+	RequestSimHash uint64
+	// HasRequestSimHash reports whether RequestSimHash is populated.
+	HasRequestSimHash bool
 }
 
 // Selector chooses an auth candidate for execution.
@@ -1302,6 +1306,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 	}
 	routeModel := req.Model
 	opts = ensureRequestedModelMetadata(opts, routeModel)
+	opts = ensureRequestSimHashMetadata(opts, m.selector)
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
 	var lastErr error
@@ -1330,6 +1335,7 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
 			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
 		}
+		execCtx = withRequestSimHash(execCtx, opts.Metadata)
 
 		models, pooled := m.preparedExecutionModels(auth, routeModel)
 		if len(models) == 0 {
@@ -1342,8 +1348,9 @@ func (m *Manager) executeMixedOnce(ctx context.Context, providers []string, req 
 			execReq := req
 			execReq.Model = upstreamModel
 			audit.SetAttempt(execCtx, provider, upstreamModel, auth.ID, auth.Label, auth.FileName, auditAuthPath(auth))
-			resp, errExec := executor.Execute(execCtx, auth, execReq, opts)
-			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
+				resp, errExec := executor.Execute(execCtx, auth, execReq, opts)
+				result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
+				attachRequestSimHashResult(&result, opts.Metadata)
 			if errExec != nil {
 				if errCtx := execCtx.Err(); errCtx != nil {
 					return cliproxyexecutor.Response{}, errCtx
@@ -1382,6 +1389,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 	}
 	routeModel := req.Model
 	opts = ensureRequestedModelMetadata(opts, routeModel)
+	opts = ensureRequestSimHashMetadata(opts, m.selector)
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
 	var lastErr error
@@ -1410,6 +1418,7 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
 			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
 		}
+		execCtx = withRequestSimHash(execCtx, opts.Metadata)
 
 		models, pooled := m.preparedExecutionModels(auth, routeModel)
 		if len(models) == 0 {
@@ -1422,8 +1431,9 @@ func (m *Manager) executeCountMixedOnce(ctx context.Context, providers []string,
 			execReq := req
 			execReq.Model = upstreamModel
 			audit.SetAttempt(execCtx, provider, upstreamModel, auth.ID, auth.Label, auth.FileName, auditAuthPath(auth))
-			resp, errExec := executor.CountTokens(execCtx, auth, execReq, opts)
-			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
+				resp, errExec := executor.CountTokens(execCtx, auth, execReq, opts)
+				result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: errExec == nil}
+				attachRequestSimHashResult(&result, opts.Metadata)
 			if errExec != nil {
 				if errCtx := execCtx.Err(); errCtx != nil {
 					return cliproxyexecutor.Response{}, errCtx
@@ -1462,6 +1472,7 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 	}
 	routeModel := req.Model
 	opts = ensureRequestedModelMetadata(opts, routeModel)
+	opts = ensureRequestSimHashMetadata(opts, m.selector)
 	tried := make(map[string]struct{})
 	attempted := make(map[string]struct{})
 	var lastErr error
@@ -1498,12 +1509,13 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 			execCtx = context.WithValue(execCtx, roundTripperContextKey{}, rt)
 			execCtx = context.WithValue(execCtx, "cliproxy.roundtripper", rt)
 		}
-		models, pooled := m.preparedExecutionModels(auth, routeModel)
-		if len(models) == 0 {
-			continue
-		}
-		attempted[auth.ID] = struct{}{}
-		streamResult, errStream := m.executeStreamWithModelPool(execCtx, executor, auth, provider, req, opts, routeModel, models, pooled)
+			execCtx = withRequestSimHash(execCtx, opts.Metadata)
+			models, pooled := m.preparedExecutionModels(auth, routeModel)
+			if len(models) == 0 {
+				continue
+			}
+			attempted[auth.ID] = struct{}{}
+			streamResult, errStream := m.executeStreamWithModelPool(execCtx, executor, auth, provider, req, opts, routeModel, models, pooled)
 		if errStream != nil {
 			if errCtx := execCtx.Err(); errCtx != nil {
 				return nil, errCtx
@@ -1555,6 +1567,18 @@ func hasRequestedModelMetadata(meta map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+func attachRequestSimHashResult(result *Result, meta map[string]any) {
+	if result == nil {
+		return
+	}
+	hash, ok := requestSimHashFromMetadata(meta)
+	if !ok {
+		return
+	}
+	result.RequestSimHash = hash
+	result.HasRequestSimHash = true
 }
 
 func pinnedAuthIDFromMetadata(meta map[string]any) string {
@@ -2001,6 +2025,12 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 	if result.AuthID == "" {
 		return
 	}
+	if !result.HasRequestSimHash {
+		if hash, ok := requestSimHashFromContext(ctx); ok {
+			result.RequestSimHash = hash
+			result.HasRequestSimHash = true
+		}
+	}
 
 	now := time.Now()
 
@@ -2013,6 +2043,10 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 
 	m.mu.Lock()
 	if auth, ok := m.auths[result.AuthID]; ok && auth != nil {
+		if result.HasRequestSimHash {
+			auth.LastRequestSimHash = result.RequestSimHash
+			auth.HasLastRequestSimHash = true
+		}
 		if result.Success {
 			if result.Model != "" {
 				state := ensureModelState(auth, result.Model)

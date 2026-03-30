@@ -103,7 +103,7 @@ quota-exceeded:
 
 # Routing strategy for selecting credentials when multiple match.
 routing:
-  strategy: "round-robin" # round-robin (default), fill-first, success-rate
+  strategy: "round-robin" # round-robin (default), fill-first, success-rate, simhash
   # success-rate:
   #   half-life-seconds: 1800 # EMA half-life for success rate scoring (default: 1800)
   #   explore-rate: 0.02      # Probability [0,1] to randomly explore a credential (default: 0.02)

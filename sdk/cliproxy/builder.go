@@ -251,6 +251,8 @@ func (b *Builder) Build() (*Service, error) {
 			selector = &coreauth.FillFirstSelector{}
 		case "success-rate", "successrate", "sr":
 			selector = coreauth.NewSuccessRateSelector(b.cfg.Routing.SuccessRate.HalfLifeSeconds, b.cfg.Routing.SuccessRate.ExploreRate)
+		case "simhash", "sh":
+			selector = &coreauth.SimHashSelector{}
 		default:
 			selector = &coreauth.RoundRobinSelector{}
 		}

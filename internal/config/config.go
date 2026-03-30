@@ -177,7 +177,7 @@ type QuotaExceeded struct {
 // RoutingConfig configures how credentials are selected for requests.
 type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
-	// Supported values: "round-robin" (default), "fill-first", "success-rate".
+	// Supported values: "round-robin" (default), "fill-first", "success-rate", "simhash".
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
 	// SuccessRate configures the "success-rate" routing strategy.

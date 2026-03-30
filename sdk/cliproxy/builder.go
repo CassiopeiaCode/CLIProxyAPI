@@ -4,12 +4,14 @@
 package cliproxy
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	configaccess "github.com/router-for-me/CLIProxyAPI/v6/internal/access/config_access"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/audit"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
@@ -49,6 +51,28 @@ type Builder struct {
 
 	// serverOptions contains additional server configuration options.
 	serverOptions []api.ServerOption
+}
+
+type requestAuditHook struct {
+	coreauth.NoopHook
+	sink *audit.Hook
+}
+
+func (h *requestAuditHook) OnResult(ctx context.Context, result coreauth.Result) {
+	if h == nil || h.sink == nil {
+		return
+	}
+	resultInfo := audit.ResultInfo{
+		Provider: strings.TrimSpace(result.Provider),
+		Model:    strings.TrimSpace(result.Model),
+		Success:  result.Success,
+		AuthID:   strings.TrimSpace(result.AuthID),
+	}
+	if result.Error != nil {
+		resultInfo.StatusCode = result.Error.StatusCode()
+		resultInfo.ErrorMessage = strings.TrimSpace(result.Error.Message)
+	}
+	h.sink.Emit(ctx, resultInfo)
 }
 
 // Hooks allows callers to plug into service lifecycle stages.
@@ -231,16 +255,20 @@ func (b *Builder) Build() (*Service, error) {
 			selector = &coreauth.RoundRobinSelector{}
 		}
 
-		// Wrap with session affinity if enabled (failover is always on)
-		if sessionAffinity {
-			selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
-				Fallback: selector,
-				TTL:      sessionAffinityTTL,
-			})
-		}
+			// Wrap with session affinity if enabled (failover is always on).
+			if sessionAffinity {
+				selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
+					Fallback: selector,
+					TTL:      sessionAffinityTTL,
+				})
+			}
 
-		coreManager = coreauth.NewManager(tokenStore, selector, nil)
-	}
+			var hook coreauth.Hook
+			if auditHook := audit.NewHook(&b.cfg.RequestAudit); auditHook != nil {
+				hook = &requestAuditHook{sink: auditHook}
+			}
+			coreManager = coreauth.NewManager(tokenStore, selector, hook)
+		}
 	// Attach a default RoundTripper provider so providers can opt-in per-auth transports.
 	coreManager.SetRoundTripperProvider(newDefaultRoundTripperProvider())
 	coreManager.SetConfig(b.cfg)

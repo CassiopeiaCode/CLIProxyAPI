@@ -1967,6 +1967,31 @@ func statusCodeFromResult(err *Error) int {
 	return err.StatusCode()
 }
 
+func isTransientProviderError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if authErr, ok := err.(*Error); ok && authErr != nil && authErr.Retryable {
+		return true
+	}
+	switch statusCodeFromError(err) {
+	case http.StatusRequestTimeout, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if message == "" {
+		return false
+	}
+	return strings.Contains(message, "context deadline exceeded") ||
+		strings.Contains(message, "deadline exceeded") ||
+		strings.Contains(message, "timeout") ||
+		strings.Contains(message, "temporary") ||
+		strings.Contains(message, "connection refused") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "unexpected eof") ||
+		strings.Contains(message, "eof")
+}
+
 // isRequestInvalidError returns true if the error represents a client request
 // error that should not be retried. Specifically, it treats 400 responses with
 // "invalid_request_error" and all 422 responses as request-shape failures,
@@ -1984,7 +2009,7 @@ func isBlockableInvalidRequestError(err error) bool {
 	case http.StatusUnauthorized, http.StatusTooManyRequests:
 		return false
 	}
-	if isTransientError(err) {
+	if isTransientProviderError(err) {
 		return false
 	}
 	message := strings.ToLower(strings.TrimSpace(err.Error()))

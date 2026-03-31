@@ -764,6 +764,9 @@ func (m *Manager) withAuditContext(ctx context.Context, req cliproxyexecutor.Req
 	}
 	maxBodyBytes := 0
 	cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config)
+	if cfg == nil || !cfg.RequestAudit.Enable || strings.TrimSpace(cfg.RequestAudit.Endpoint) == "" {
+		return ctx
+	}
 	if cfg != nil {
 		maxBodyBytes = cfg.RequestAudit.MaxBodyBytes
 	}
@@ -1219,7 +1222,9 @@ func (m *Manager) Load(ctx context.Context) error {
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
 	ctx = m.withAuditContext(ctx, req, opts)
-	if err := m.rejectBlockedRequest(opts); err != nil {
+	var err error
+	opts, err = m.rejectBlockedRequest(opts)
+	if err != nil {
 		return cliproxyexecutor.Response{}, err
 	}
 	normalized := m.normalizeProviders(providers)
@@ -1254,7 +1259,9 @@ func (m *Manager) Execute(ctx context.Context, providers []string, req cliproxye
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
 	ctx = m.withAuditContext(ctx, req, opts)
-	if err := m.rejectBlockedRequest(opts); err != nil {
+	var err error
+	opts, err = m.rejectBlockedRequest(opts)
+	if err != nil {
 		return cliproxyexecutor.Response{}, err
 	}
 	normalized := m.normalizeProviders(providers)
@@ -1289,7 +1296,9 @@ func (m *Manager) ExecuteCount(ctx context.Context, providers []string, req clip
 // It supports multiple providers for the same model and round-robins the starting provider per model.
 func (m *Manager) ExecuteStream(ctx context.Context, providers []string, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
 	ctx = m.withAuditContext(ctx, req, opts)
-	if err := m.rejectBlockedRequest(opts); err != nil {
+	var err error
+	opts, err = m.rejectBlockedRequest(opts)
+	if err != nil {
 		return nil, err
 	}
 	normalized := m.normalizeProviders(providers)
@@ -2563,18 +2572,18 @@ func isBlockableInvalidRequestError(err error) bool {
 	return false
 }
 
-func (m *Manager) rejectBlockedRequest(opts cliproxyexecutor.Options) error {
+func (m *Manager) rejectBlockedRequest(opts cliproxyexecutor.Options) (cliproxyexecutor.Options, error) {
 	if m == nil || m.blockedRequests == nil {
-		return nil
+		return opts, nil
 	}
-	hash, ok := requestBodyHash(opts.OriginalRequest)
+	updated, hash, ok := requestBodyHashFromOptions(opts)
 	if !ok {
-		return nil
+		return updated, nil
 	}
 	if !m.blockedRequests.Contains(hash) {
-		return nil
+		return updated, nil
 	}
-	return &Error{
+	return updated, &Error{
 		Code:       "blocked_invalid_request",
 		Message:    "request body matches a previously blocked invalid request",
 		Retryable:  false,
@@ -2586,7 +2595,7 @@ func (m *Manager) recordBlockedRequest(opts cliproxyexecutor.Options, err error)
 	if m == nil || m.blockedRequests == nil || !isBlockableInvalidRequestError(err) {
 		return
 	}
-	hash, ok := requestBodyHash(opts.OriginalRequest)
+	_, hash, ok := requestBodyHashFromOptions(opts)
 	if !ok {
 		return
 	}

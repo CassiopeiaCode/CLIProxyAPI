@@ -155,3 +155,39 @@ func TestSimHashSelectorAdmissionOrderChangesAcrossEpochs(t *testing.T) {
 		t.Fatal("expected admission candidates")
 	}
 }
+
+func TestSimHashSelectorKeepsPreferredOutsiderUntilItChangesState(t *testing.T) {
+	selector := NewSimHashSelector(internalconfig.RoutingSimHashConfig{PoolSize: 1, AdmitCooldownSeconds: 3600})
+	now := time.Unix(0, 0)
+	outsiders := []*Auth{
+		{ID: "a", Provider: "codex", Status: StatusActive},
+		{ID: "b", Provider: "codex", Status: StatusActive},
+		{ID: "c", Provider: "codex", Status: StatusActive},
+	}
+
+	first := selector.pickAdmissionCandidateLocked(now, outsiders)
+	if first == nil {
+		t.Fatal("expected first candidate")
+	}
+	second := selector.pickAdmissionCandidateLocked(now.Add(5*time.Minute), outsiders)
+	if second == nil {
+		t.Fatal("expected second candidate")
+	}
+	if second.ID != first.ID {
+		t.Fatalf("preferred outsider drifted from %q to %q", first.ID, second.ID)
+	}
+
+	remaining := make([]*Auth, 0, len(outsiders)-1)
+	for _, auth := range outsiders {
+		if auth.ID != first.ID {
+			remaining = append(remaining, auth)
+		}
+	}
+	next := selector.pickAdmissionCandidateLocked(now.Add(6*time.Minute), remaining)
+	if next == nil {
+		t.Fatal("expected next candidate after removing preferred outsider")
+	}
+	if next.ID == first.ID {
+		t.Fatalf("expected preferred outsider to advance after removal, still got %q", next.ID)
+	}
+}

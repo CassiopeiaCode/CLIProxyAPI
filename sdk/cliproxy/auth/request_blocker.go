@@ -4,8 +4,9 @@ import (
 	"container/list"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"sync"
+
+	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
 )
 
 type blockedRequestLRU struct {
@@ -76,13 +77,22 @@ func requestBodyHash(payload []byte) (string, bool) {
 	if len(payload) == 0 {
 		return "", false
 	}
-	normalized := payload
-	var value any
-	if err := json.Unmarshal(payload, &value); err == nil {
-		if encoded, marshalErr := json.Marshal(value); marshalErr == nil && len(encoded) > 0 {
-			normalized = encoded
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), true
+}
+
+func requestBodyHashFromOptions(opts cliproxyexecutor.Options) (cliproxyexecutor.Options, string, bool) {
+	if analysis, ok := requestBodyAnalysisFromMetadata(opts.Metadata); ok {
+		if len(analysis.canonicalJSON) > 0 {
+			hash, ok := requestBodyHash(analysis.canonicalJSON)
+			return opts, hash, ok
 		}
 	}
-	sum := sha256.Sum256(normalized)
-	return hex.EncodeToString(sum[:]), true
+	updated, analysis, ok := ensureRequestBodyAnalysisMetadata(opts)
+	if ok && analysis != nil && len(analysis.canonicalJSON) > 0 {
+		hash, ok := requestBodyHash(analysis.canonicalJSON)
+		return updated, hash, ok
+	}
+	hash, ok := requestBodyHash(opts.OriginalRequest)
+	return updated, hash, ok
 }

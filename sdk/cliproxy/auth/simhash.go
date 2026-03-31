@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"hash/fnv"
+	"maps"
 	"sort"
 	"strings"
 	"unicode"
@@ -18,7 +19,16 @@ const (
 	simhashArrayKeep       = 3
 	simhashStringThreshold = 100
 	simhashStringKeep      = 50
+
+	requestBodyAnalysisMetadataKey = "__request_body_analysis"
 )
+
+type requestBodyAnalysis struct {
+	parsed        any
+	canonicalJSON []byte
+	simHash       uint64
+	hasSimHash    bool
+}
 
 func ensureRequestSimHashMetadata(opts cliproxyexecutor.Options, selector Selector) cliproxyexecutor.Options {
 	if _, ok := selector.(*SimHashSelector); !ok {
@@ -27,19 +37,12 @@ func ensureRequestSimHashMetadata(opts cliproxyexecutor.Options, selector Select
 	if hasRequestSimHashMetadata(opts.Metadata) {
 		return opts
 	}
-	hash, ok := requestSimHash(opts.OriginalRequest)
-	if !ok {
+	opts, analysis, ok := ensureRequestBodyAnalysisMetadata(opts)
+	if !ok || analysis == nil || !analysis.hasSimHash {
 		return opts
 	}
-	if len(opts.Metadata) == 0 {
-		opts.Metadata = map[string]any{cliproxyexecutor.RequestSimHashMetadataKey: hash}
-		return opts
-	}
-	meta := make(map[string]any, len(opts.Metadata)+1)
-	for k, v := range opts.Metadata {
-		meta[k] = v
-	}
-	meta[cliproxyexecutor.RequestSimHashMetadataKey] = hash
+	meta := cloneMetadataWithExtra(opts.Metadata, 1)
+	meta[cliproxyexecutor.RequestSimHashMetadataKey] = analysis.simHash
 	opts.Metadata = meta
 	return opts
 }
@@ -68,6 +71,10 @@ func requestSimHash(payload []byte) (uint64, bool) {
 	if err := json.Unmarshal(payload, &value); err != nil {
 		return 0, false
 	}
+	return requestSimHashFromParsed(value)
+}
+
+func requestSimHashFromParsed(value any) (uint64, bool) {
 	tokens := make([]string, 0, 64)
 	collectSimHashTokens("root", compactSimHashValue(value), &tokens)
 	if len(tokens) == 0 {
@@ -91,6 +98,52 @@ func requestSimHash(payload []byte) (uint64, bool) {
 		}
 	}
 	return out, true
+}
+
+func ensureRequestBodyAnalysisMetadata(opts cliproxyexecutor.Options) (cliproxyexecutor.Options, *requestBodyAnalysis, bool) {
+	if analysis, ok := requestBodyAnalysisFromMetadata(opts.Metadata); ok {
+		return opts, analysis, true
+	}
+	if len(opts.OriginalRequest) == 0 {
+		return opts, nil, false
+	}
+	var value any
+	if err := json.Unmarshal(opts.OriginalRequest, &value); err != nil {
+		return opts, nil, false
+	}
+	analysis := &requestBodyAnalysis{parsed: value}
+	if encoded, err := json.Marshal(value); err == nil && len(encoded) > 0 {
+		analysis.canonicalJSON = encoded
+	}
+	analysis.simHash, analysis.hasSimHash = requestSimHashFromParsed(value)
+	meta := cloneMetadataWithExtra(opts.Metadata, 1)
+	meta[requestBodyAnalysisMetadataKey] = analysis
+	opts.Metadata = meta
+	return opts, analysis, true
+}
+
+func requestBodyAnalysisFromMetadata(meta map[string]any) (*requestBodyAnalysis, bool) {
+	if len(meta) == 0 {
+		return nil, false
+	}
+	raw, ok := meta[requestBodyAnalysisMetadataKey]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	analysis, ok := raw.(*requestBodyAnalysis)
+	return analysis, ok && analysis != nil
+}
+
+func cloneMetadataWithExtra(meta map[string]any, extra int) map[string]any {
+	if extra < 1 {
+		extra = 1
+	}
+	if len(meta) == 0 {
+		return make(map[string]any, extra)
+	}
+	cloned := make(map[string]any, len(meta)+extra)
+	maps.Copy(cloned, meta)
+	return cloned
 }
 
 func compactSimHashValue(value any) any {

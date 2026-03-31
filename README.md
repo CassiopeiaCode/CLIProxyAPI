@@ -1,186 +1,174 @@
-# CLI Proxy API
+# CLIProxyAPI 二开项目说明
 
-English | [中文](README_CN.md)
+首先感谢原项目 [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 打下的基础
 
-A proxy server that provides OpenAI/Gemini/Claude/Codex compatible API interfaces for CLI.
+同时感谢 [LINUX DO](https://linux.do) 社区以及各位佬友长期的使用反馈
 
-It now also supports OpenAI Codex (GPT models) and Claude Code via OAuth.
+## 这次二开主要做了两件事
 
-So you can use local or multi-account CLI access with OpenAI(include Responses)/Gemini/Claude-compatible clients and SDKs.
+1. 重点做性能优化，尤其是压缩 Codex 请求转换链路中的 JSON 重复计算序列化次数。
+2. 增加了一批在真实使用中非常实用的新策略和新功能，让系统在复杂账号池和复杂请求场景下更稳、更好用。
 
-## Sponsor
+## 1. 性能改进                 
 
-[![z.ai](https://assets.router-for.me/english-5-0.jpg)](https://z.ai/subscribe?ic=8JVLJQFSKB)
+这次二开的核心性能优化，不是抽象地说“更快了”，而是非常明确地减少了 Codex 请求转换链路中的整段 JSON 计算序列化次数。
 
-This project is sponsored by Z.ai, supporting us with their GLM CODING PLAN.
+原实现的问题在于：它不是先把完整结构在内存里组装好，再统一输出；而是每设置一个字段、每追加一条消息、每追加一个内容块、每追加一个 tool call，都通过 `sjson.Set(...)` 或 `sjson.SetRaw(...)` 对当前整段 JSON 再计算序列化一次。
 
-GLM CODING PLAN is a subscription service designed for AI coding, starting at just $10/month. It provides access to their flagship GLM-4.7 & （GLM-5 Only Available  for Pro Users）model across 10+ popular AI coding tools (Claude Code, Cline, Roo Code, etc.), offering developers top-tier, fast, and stable coding experiences.
+所以，要比较原实现和新实现，最直接的方法不是讲模糊的“请求复杂度”，而是直接比：
 
-Get 10% OFF GLM CODING PLAN：https://z.ai/subscribe?ic=8JVLJQFSKB
+- 原实现整段输出 JSON 一共会被计算序列化多少次
+- 新实现整段输出 JSON 一共会被计算序列化多少次
 
----
+### 1.1 变量定义
 
-<table>
-<tbody>
-<tr>
-<td width="180"><a href="https://www.packyapi.com/register?aff=cliproxyapi"><img src="./assets/packycode.png" alt="PackyCode" width="150"></a></td>
-<td>Thanks to PackyCode for sponsoring this project! PackyCode is a reliable and efficient API relay service provider, offering relay services for Claude Code, Codex, Gemini, and more. PackyCode provides special discounts for our software users: register using <a href="https://www.packyapi.com/register?aff=cliproxyapi">this link</a> and enter the "cliproxyapi" promo code during recharge to get 10% off.</td>
-</tr>
-<tr>
-<td width="180"><a href="https://www.aicodemirror.com/register?invitecode=TJNAIF"><img src="./assets/aicodemirror.png" alt="AICodeMirror" width="150"></a></td>
-<td>Thanks to AICodeMirror for sponsoring this project! AICodeMirror provides official high-stability relay services for Claude Code / Codex / Gemini CLI, with enterprise-grade concurrency, fast invoicing, and 24/7 dedicated technical support. Claude Code / Codex / Gemini official channels at 38% / 2% / 9% of original price, with extra discounts on top-ups! AICodeMirror offers special benefits for CLIProxyAPI users: register via <a href="https://www.aicodemirror.com/register?invitecode=TJNAIF">this link</a> to enjoy 20% off your first top-up, and enterprise customers can get up to 25% off!</td>
-</tr>
-</tbody>
-</table>
+设一次请求中：
 
-## Overview
+- `m_user`：`role = user` 的消息数
+- `m_assistant`：`role = assistant` 的消息数
+- `m_system`：`role = system` 的消息数
+- `m_tool`：`role = tool` 的消息数
+- `s_content`：普通消息中，`content` 为字符串的消息数
+- `pt`：所有数组型 `content` 中，`text` 类型内容块总数
+- `pi`：所有数组型 `content` 中，`image_url` 类型内容块总数
+- `pf`：所有数组型 `content` 中，`file` 类型内容块总数
+- `c`：所有 assistant 消息中的 `tool_calls` 总数
+- `tf`：`function` 类型工具总数
+- `tb`：内建工具总数
+- `rf_text`：`response_format.type = text` 时记 `1`，否则记 `0`
+- `rf_schema`：`response_format.type = json_schema` 时记 `1`，否则记 `0`
+- `v_only`：只使用 `text.verbosity` 且前面没有创建 `text` 时记 `1`，否则记 `0`
+- `v_with_rf`：在已有 `response_format` 的前提下再使用 `text.verbosity` 时记 `1`，否则记 `0`
+- `tc_str`：`tool_choice` 是字符串时记 `1`，否则记 `0`
+- `tc_func`：`tool_choice` 是 function object 时记 `1`，否则记 `0`
+- `tc_builtin`：`tool_choice` 是 builtin object 时记 `1`，否则记 `0`
 
-- OpenAI/Gemini/Claude compatible API endpoints for CLI models
-- OpenAI Codex support (GPT models) via OAuth login
-- Claude Code support via OAuth login
-- Qwen Code support via OAuth login
-- iFlow support via OAuth login
-- Amp CLI and IDE extensions support with provider routing
-- Streaming and non-streaming responses
-- Function calling/tools support
-- Multimodal input support (text and images)
-- Multiple accounts with round-robin load balancing (Gemini, OpenAI, Claude, Qwen and iFlow)
-- Simple CLI authentication flows (Gemini, OpenAI, Claude, Qwen and iFlow)
-- Generative Language API Key support
-- AI Studio Build multi-account load balancing
-- Gemini CLI multi-account load balancing
-- Claude Code multi-account load balancing
-- Qwen Code multi-account load balancing
-- iFlow multi-account load balancing
-- OpenAI Codex multi-account load balancing
-- OpenAI-compatible upstream providers via config (e.g., OpenRouter)
-- Reusable Go SDK for embedding the proxy (see `docs/sdk-usage.md`)
+再定义：
 
-## Getting Started
+- `z_old`：原实现中，整段输出 JSON 被重新计算序列化的总次数
+- `z_new`：新实现中，整段输出 JSON 被重新计算序列化的总次数
 
-CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
+### 1.2 原实现整段 JSON 的总序列化次数
 
-## Management API
+原实现中，每一次 `sjson.Set(...)` 和 `sjson.SetRaw(...)` 都会触发一次整段输出 JSON 的重新计算序列化。
 
-see [MANAGEMENT_API.md](https://help.router-for.me/management/api)
+把所有会命中的路径展开后，原实现请求侧的总序列化次数可以写成：
 
-## Amp CLI Support
+\[
+z_{old}
+=
+9
++ 4(m_{user}+m_{assistant}+m_{system})
++ 4m_{tool}
++ 3s_{content}
++ 3pt
++ 3pi
++ 4pf
++ 5c
++ tb
++ 6tf
++ 2rf_{text}
++ 5rf_{schema}
++ 2v_{only}
++ v_{with\_rf}
++ tc_{str}
++ 3tc_{func}
++ tc_{builtin}
+\]
 
-CLIProxyAPI includes integrated support for [Amp CLI](https://ampcode.com) and Amp IDE extensions, enabling you to use your Google/ChatGPT/Claude OAuth subscriptions with Amp's coding tools:
+这个式子不是泛泛而谈，而是把原实现中“到底哪里会增加整段 JSON 重算次数”全部展开了：
 
-- Provider route aliases for Amp's API patterns (`/api/provider/{provider}/v1...`)
-- Management proxy for OAuth authentication and account features
-- Smart model fallback with automatic routing
-- **Model mapping** to route unavailable models to alternatives (e.g., `claude-opus-4.5` → `claude-sonnet-4`)
-- Security-first design with localhost-only management endpoints
+- 每条普通消息固定增加 `4` 次
+- 每条 tool 消息固定增加 `4` 次
+- 每个字符串型 content 固定增加 `3` 次
+- 每个 `text` 内容块固定增加 `3` 次
+- 每个 `image_url` 内容块固定增加 `3` 次
+- 每个 `file` 内容块固定增加 `4` 次
+- 每个 tool call 固定增加 `5` 次
+- 每个内建工具固定增加 `1` 次
+- 每个 function 工具固定增加 `6` 次
 
-**→ [Complete Amp CLI Integration Guide](https://help.router-for.me/agent-client/amp-cli.html)**
+也就是说，原实现不是“看起来复杂一些”，而是请求里每多一条消息、每多一个内容块、每多一个 tool call，就会明确多出对应次数的整段 JSON 重新计算序列化。
 
-## SDK Docs
+### 1.3 新实现整段 JSON 的总序列化次数
 
-- Usage: [docs/sdk-usage.md](docs/sdk-usage.md)
-- Advanced (executors & translators): [docs/sdk-advanced.md](docs/sdk-advanced.md)
-- Access: [docs/sdk-access.md](docs/sdk-access.md)
-- Watcher: [docs/sdk-watcher.md](docs/sdk-watcher.md)
-- Custom Provider Example: `examples/custom-provider`
+二开后，请求侧改成了：
 
-## Contributing
+- 先在内存中完成结构化构造
+- 最后统一 `json.Marshal(out)` 一次输出
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+因此：
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+\[
+z_{new} = 1
+\]
 
-## Who is with us?
+这个值是固定的，不再随着消息数量、内容块数量、工具数量和 tool call 数量继续增长。
 
-Those projects are based on CLIProxyAPI:
+### 1.4 这次性能优化到底优化了什么
 
-### [vibeproxy](https://github.com/automazeio/vibeproxy)
+所以这次性能优化的核心，不是简单地说“减少了一些 JSON 操作”，而是：
 
-Native macOS menu bar app to use your Claude Code & ChatGPT subscriptions with AI coding tools - no API keys needed
+- 原实现：整段 JSON 的总序列化次数是一个会随着请求结构持续增长的表达式
+- 二开后：整段 JSON 的总序列化次数直接收敛为 `1`
 
-### [Subtitle Translator](https://github.com/VjayC/SRT-Subtitle-Translator-Validator)
+也就是说，这次二开真正解决的是：
 
-Browser-based tool to translate SRT subtitles using your Gemini subscription via CLIProxyAPI with automatic validation/error correction - no API keys needed
+- 原实现中，每条消息、每个内容块、每个 tool call 都在继续抬高整段 JSON 的重复序列化次数
+- 二开后，这些变量只影响内存中的结构构造，不再驱动整段输出 JSON 被反复重算
 
-### [CCS (Claude Code Switch)](https://github.com/kaitranntt/ccs)
+这也是为什么在客户端一个请求里经常包含 20 多轮对话时，这条链路的收益会特别明显。原实现会随着消息和内容继续累加整段 JSON 的重算次数，而二开后请求侧始终只保留 1 次最终输出序列化。
 
-CLI wrapper for instant switching between multiple Claude accounts and alternative models (Gemini, Codex, Antigravity) via CLIProxyAPI OAuth - no API keys needed
+## 2. 新增功能
 
-### [ProxyPal](https://github.com/heyhuynhgiabuu/proxypal)
+除了性能优化，这次二开还补了一批真正有实际价值的新功能和新策略，重点不是堆入口，而是让复杂场景下的可用性和稳定性更高。
 
-Native macOS GUI for managing CLIProxyAPI: configure providers, model mappings, and endpoints via OAuth - no API keys needed.
+### 2.1 新增认证池调度策略
 
-### [Quotio](https://github.com/nguyenphutrong/quotio)
+新增了更完整的认证池调度能力，不再只是简单轮询，而是开始支持：
 
-Native macOS menu bar app that unifies Claude, Gemini, OpenAI, Qwen, and Antigravity subscriptions with real-time quota tracking and smart auto-failover for AI coding tools like Claude Code, OpenCode, and Droid - no API keys needed.
+- 基于成功趋势的选择策略
+- 基于请求相似性的路由策略
+- 更稳定的虚拟池控制
+- 更稳定的入池和选路顺序
 
-### [CodMate](https://github.com/loocor/CodMate)
+这部分增强解决的是原项目在复杂账号池场景下一个非常现实的问题：当账号数量越来越多、模型种类越来越多、请求类型越来越杂时，只靠基础轮询或者简单优先级，系统虽然还能“分发请求”，但已经很难保证“分发得足够稳、足够准”。
 
-Native macOS SwiftUI app for managing CLI AI sessions (Codex, Claude Code, Gemini CLI) with unified provider management, Git review, project organization, global search, and terminal integration. Integrates CLIProxyAPI to provide OAuth authentication for Codex, Claude, Gemini, Antigravity, and Qwen Code, with built-in and third-party provider rerouting through a single proxy endpoint - no API keys needed for OAuth providers.
+这次二开在认证调度上补的，不只是一个单点策略，而是一整套更适合真实使用环境的调度能力：
 
-### [ProxyPilot](https://github.com/Finesssee/ProxyPilot)
+- 会根据近期成功趋势调整选择方向，而不是只看静态顺序
+- 会利用请求相似性让路由更稳定，减少池内频繁漂移
+- 会把虚拟池控制做得更完整，而不是让不同来源的认证简单堆在一起
+- 会更强调入池顺序和选路顺序的稳定性，避免边界场景下行为不可预测
 
-Windows-native CLIProxyAPI fork with TUI, system tray, and multi-provider OAuth for AI coding tools - no API keys needed.
+这些能力叠加之后，系统的状态就不再只是“能挑一个账号出去跑”，而是更接近“知道什么请求应该更稳地落到什么账号或什么池上”。对多账号、多模型、多计划层级共存的场景来说，这一点非常关键，因为很多问题不是“完全不可用”，而是“经常抖、经常漂、经常选得不够好”，而这正是二开重点解决的部分。
 
-### [Claude Proxy VSCode](https://github.com/uzhao/claude-proxy-vscode)
+### 2.2 新增无效请求阻断能力
 
-VSCode extension for quick switching between Claude Code models, featuring integrated CLIProxyAPI as its backend with automatic background lifecycle management.
+新增了对重复无效请求的识别和阻断能力，避免明显错误的请求反复进入上游。
 
-### [ZeroLimit](https://github.com/0xtbug/zero-limit)
+这带来的价值包括：
 
-Windows desktop app built with Tauri + React for monitoring AI coding assistant quotas via CLIProxyAPI. Track usage across Gemini, Claude, OpenAI Codex, and Antigravity accounts with real-time dashboard, system tray integration, and one-click proxy control - no API keys needed.
+- 减少无意义的上游消耗
+- 减少错误日志的重复放大
+- 降低坏请求持续干扰调度的概率
 
-### [CPA-XXX Panel](https://github.com/ferretgeek/CPA-X)
+这部分增强解决的不是“系统会不会报错”，而是“同一个错误请求会不会反复消耗系统资源”。在真实使用里，最烦人的往往不是一次错误，而是重复的错误请求不断进入系统，然后不断占用：
 
-A lightweight web admin panel for CLIProxyAPI with health checks, resource monitoring, real-time logs, auto-update, request statistics and pricing display. Supports one-click installation and systemd service.
+- 上游请求额度
+- 调度判断次数
+- 错误日志空间
+- 排障注意力
 
-### [CLIProxyAPI Tray](https://github.com/kitephp/CLIProxyAPI_Tray)
+如果系统只是被动返回错误，那么这些坏请求虽然每次都失败了，但依然会一轮一轮地走完整条链路。二开补上这部分之后，系统可以更早地识别重复无效载荷，并把它们挡在更前面，而不是每次都继续送到上游再失败一次。
 
-A Windows tray application implemented using PowerShell scripts, without relying on any third-party libraries. The main features include: automatic creation of shortcuts, silent running, password management, channel switching (Main / Plus), and automatic downloading and updating.
+这类能力在代码层面看起来不像“新模型支持”那样显眼，但在长期运行场景里非常重要。因为一个成熟的代理层不只是要处理成功请求，也必须知道哪些请求根本不该继续放行。只有把这类重复无效请求拦住，调度层、日志层和上游资源才不会被持续污染。
 
-### [霖君](https://github.com/wangdabaoqq/LinJun)
+## 总结
 
-霖君 is a cross-platform desktop application for managing AI programming assistants, supporting macOS, Windows, and Linux systems. Unified management of Claude Code, Gemini CLI, OpenAI Codex, Qwen Code, and other AI coding tools, with local proxy for multi-account quota tracking and one-click configuration.
+这次二开最核心的事情其实就两条：
 
-### [CLIProxyAPI Dashboard](https://github.com/itsmylife44/cliproxyapi-dashboard)
+1. 在性能上，把原实现里会随着消息、内容块、tool call 持续增长的整段 JSON 重复序列化次数，压缩成了固定 `1` 次。
+2. 在功能上，增加了认证调度、无效请求阻断、审计、模型管理、流式/WebSocket 和多 Provider 兼容等一整批真正影响实际可用性的新能力。
 
-A modern web-based management dashboard for CLIProxyAPI built with Next.js, React, and PostgreSQL. Features real-time log streaming, structured configuration editing, API key management, OAuth provider integration for Claude/Gemini/Codex, usage analytics, container management, and config sync with OpenCode via companion plugin - no manual YAML editing needed.
-
-### [All API Hub](https://github.com/qixing-jk/all-api-hub)
-
-Browser extension for one-stop management of New API-compatible relay site accounts, featuring balance and usage dashboards, auto check-in, one-click key export to common apps, in-page API availability testing, and channel/model sync and redirection. It integrates with CLIProxyAPI through the Management API for one-click provider import and config sync.
-
-### [Shadow AI](https://github.com/HEUDavid/shadow-ai)
-
-Shadow AI is an AI assistant tool designed specifically for restricted environments. It provides a stealthy operation
-mode without windows or traces, and enables cross-device AI Q&A interaction and control via the local area network (
-LAN). Essentially, it is an automated collaboration layer of "screen/audio capture + AI inference + low-friction delivery",
-helping users to immersively use AI assistants across applications on controlled devices or in restricted environments.
-
-> [!NOTE]  
-> If you developed a project based on CLIProxyAPI, please open a PR to add it to this list.
-
-## More choices
-
-Those projects are ports of CLIProxyAPI or inspired by it:
-
-### [9Router](https://github.com/decolua/9router)
-
-A Next.js implementation inspired by CLIProxyAPI, easy to install and use, built from scratch with format translation (OpenAI/Claude/Gemini/Ollama), combo system with auto-fallback, multi-account management with exponential backoff, a Next.js web dashboard, and support for CLI tools (Cursor, Claude Code, Cline, RooCode) - no API keys needed.
-
-### [OmniRoute](https://github.com/diegosouzapw/OmniRoute)
-
-Never stop coding. Smart routing to FREE & low-cost AI models with automatic fallback.
-
-OmniRoute is an AI gateway for multi-provider LLMs: an OpenAI-compatible endpoint with smart routing, load balancing, retries, and fallbacks. Add policies, rate limits, caching, and observability for reliable, cost-aware inference.
-
-> [!NOTE]  
-> If you have developed a port of CLIProxyAPI or a project inspired by it, please open a PR to add it to this list.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+所以，这个二开版本不是简单做了几处零散修改，而是同时把请求转换链路做轻了，也把复杂场景下真正需要的能力补齐了。

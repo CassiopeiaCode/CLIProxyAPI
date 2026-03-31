@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"hash/fnv"
 	"math/bits"
 	"strconv"

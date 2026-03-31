@@ -473,6 +473,7 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 	if errMsg != nil {
 		return nil, nil, errMsg
 	}
+	primeRequestTranslationCache(handlerType, rawJSON)
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = normalizedModel
 	payload := rawJSON
@@ -520,6 +521,7 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 	if errMsg != nil {
 		return nil, nil, errMsg
 	}
+	primeRequestTranslationCache(handlerType, rawJSON)
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = normalizedModel
 	payload := rawJSON
@@ -571,6 +573,7 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 		close(errChan)
 		return nil, nil, errChan
 	}
+	primeRequestTranslationCache(handlerType, rawJSON)
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = normalizedModel
 	payload := rawJSON
@@ -764,6 +767,16 @@ func validateSSEDataJSON(chunk []byte) error {
 		return fmt.Errorf("invalid SSE data JSON (len=%d): %q", len(data), preview)
 	}
 	return nil
+}
+
+func primeRequestTranslationCache(handlerType string, rawJSON []byte) {
+	if len(rawJSON) == 0 {
+		return
+	}
+	switch sdktranslator.FromString(handlerType) {
+	case sdktranslator.FormatOpenAI:
+		sdktranslator.PrimeOpenAIChatCompletionsRequest(rawJSON)
+	}
 }
 
 func statusFromError(err error) int {

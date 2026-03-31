@@ -115,8 +115,11 @@ type chatContentFile struct {
 // Returns:
 //   - []byte: The transformed request data in OpenAI Responses API format
 func ConvertOpenAIRequestToCodex(modelName string, inputRawJSON []byte, stream bool) []byte {
-	var req chatReqInput
-	_ = json.Unmarshal(inputRawJSON, &req)
+	req, ok := cachedOpenAIRequest(inputRawJSON)
+	if !ok {
+		_ = json.Unmarshal(inputRawJSON, &req)
+		PrimeOpenAIRequest(inputRawJSON)
+	}
 
 	// Build tool-name shortening map from all function tools in the request.
 	var funcNames []string

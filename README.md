@@ -54,27 +54,7 @@
 
 把所有会命中的路径展开后，原实现请求侧的总序列化次数可以写成：
 
-\[
-z_{old}
-=
-9
-+ 4(m_{user}+m_{assistant}+m_{system})
-+ 4m_{tool}
-+ 3s_{content}
-+ 3pt
-+ 3pi
-+ 4pf
-+ 5c
-+ tb
-+ 6tf
-+ 2rf_{text}
-+ 5rf_{schema}
-+ 2v_{only}
-+ v_{with\_rf}
-+ tc_{str}
-+ 3tc_{func}
-+ tc_{builtin}
-\]
+\[ z_{old} = 9 + 4(m_{user}+m_{assistant}+m_{system}) + 4m_{tool} + 3s_{content} + 3pt + 3pi + 4pf + 5c + tb + 6tf + 2rf_{text} + 5rf_{schema} + 2v_{only} + v_{with\_rf} + tc_{str} + 3tc_{func} + tc_{builtin} \]
 
 这个式子不是泛泛而谈，而是把原实现中“到底哪里会增加整段 JSON 重算次数”全部展开了：
 

@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"math/bits"
+	"sort"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 const (
 	defaultSimHashPoolSize            = 10
 	defaultSimHashAdmitCooldownSecond = 1
+	simHashAdmissionEpoch             = 10 * time.Minute
 )
 
 type simHashPoolState struct {
@@ -74,7 +77,7 @@ func (s *SimHashSelector) Pick(ctx context.Context, provider, model string, opts
 	poolMembers, outsiders := s.partitionAvailableLocked(available)
 
 	if len(s.pool.members) < s.effectivePoolSizeLocked() && len(outsiders) > 0 {
-		admitted := s.pickRoundRobinLocked("simhash:admit", outsiders)
+		admitted := s.pickAdmissionCandidateLocked(now, outsiders)
 		if admitted != nil {
 			s.pool.members[admitted.ID] = struct{}{}
 			s.pool.lastAdmittedAt = now
@@ -87,7 +90,7 @@ func (s *SimHashSelector) Pick(ctx context.Context, provider, model string, opts
 	}
 
 	if len(poolMembers) == 0 && len(outsiders) > 0 && (!s.pool.everFilled || now.Sub(s.pool.lastAdmittedAt) >= s.admitCooldownLocked()) {
-		admitted := s.pickRoundRobinLocked("simhash:admit", outsiders)
+		admitted := s.pickAdmissionCandidateLocked(now, outsiders)
 		if admitted != nil {
 			s.pool.members[admitted.ID] = struct{}{}
 			s.pool.lastAdmittedAt = now
@@ -185,6 +188,26 @@ func (s *SimHashSelector) partitionAvailableLocked(available []*Auth) ([]*Auth, 
 	return members, outsiders
 }
 
+func (s *SimHashSelector) pickAdmissionCandidateLocked(now time.Time, auths []*Auth) *Auth {
+	if len(auths) == 0 {
+		return nil
+	}
+	if len(auths) == 1 {
+		return auths[0]
+	}
+	ordered := append([]*Auth(nil), auths...)
+	epoch := admissionEpoch(now)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left := admissionOrderScore(epoch, ordered[i])
+		right := admissionOrderScore(epoch, ordered[j])
+		if left != right {
+			return left < right
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	return ordered[0]
+}
+
 func (s *SimHashSelector) pickRoundRobinLocked(key string, auths []*Auth) *Auth {
 	if len(auths) == 0 {
 		return nil
@@ -208,6 +231,22 @@ func (s *SimHashSelector) pickRoundRobinLocked(key string, auths []*Auth) *Auth 
 	}
 	s.cursors[key] = index + 1
 	return auths[index%len(auths)]
+}
+
+func admissionEpoch(now time.Time) int64 {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return now.UTC().Unix() / int64(simHashAdmissionEpoch/time.Second)
+}
+
+func admissionOrderScore(epoch int64, auth *Auth) uint64 {
+	if auth == nil {
+		return 0
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(fmt.Sprintf("%d:%s", epoch, auth.ID)))
+	return h.Sum64()
 }
 
 func (s *SimHashSelector) effectivePoolSizeLocked() int {

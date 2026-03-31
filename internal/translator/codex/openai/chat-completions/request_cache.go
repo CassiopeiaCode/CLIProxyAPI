@@ -2,6 +2,7 @@ package chat_completions
 
 import (
 	"container/list"
+	"crypto/sha256"
 	"encoding/json"
 	"sync"
 )
@@ -9,14 +10,14 @@ import (
 const parsedRequestCacheSize = 256
 
 type parsedRequestCacheEntry struct {
-	key string
+	key [32]byte
 	req chatReqInput
 }
 
 type parsedRequestCache struct {
 	mu    sync.Mutex
 	order *list.List
-	items map[string]*list.Element
+	items map[[32]byte]*list.Element
 }
 
 var openAIRequestCache = newParsedRequestCache(parsedRequestCacheSize)
@@ -27,7 +28,7 @@ func newParsedRequestCache(size int) *parsedRequestCache {
 	}
 	return &parsedRequestCache{
 		order: list.New(),
-		items: make(map[string]*list.Element, size),
+		items: make(map[[32]byte]*list.Element, size),
 	}
 }
 
@@ -35,7 +36,7 @@ func PrimeOpenAIRequest(rawJSON []byte) {
 	if len(rawJSON) == 0 {
 		return
 	}
-	cacheKey := string(rawJSON)
+	cacheKey := requestCacheKey(rawJSON)
 	if _, ok := openAIRequestCache.get(cacheKey); ok {
 		return
 	}
@@ -50,10 +51,14 @@ func cachedOpenAIRequest(rawJSON []byte) (chatReqInput, bool) {
 	if len(rawJSON) == 0 {
 		return chatReqInput{}, false
 	}
-	return openAIRequestCache.get(string(rawJSON))
+	return openAIRequestCache.get(requestCacheKey(rawJSON))
 }
 
-func (c *parsedRequestCache) get(key string) (chatReqInput, bool) {
+func requestCacheKey(rawJSON []byte) [32]byte {
+	return sha256.Sum256(rawJSON)
+}
+
+func (c *parsedRequestCache) get(key [32]byte) (chatReqInput, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -69,7 +74,7 @@ func (c *parsedRequestCache) get(key string) (chatReqInput, bool) {
 	return entry.req, true
 }
 
-func (c *parsedRequestCache) put(key string, req chatReqInput) {
+func (c *parsedRequestCache) put(key [32]byte, req chatReqInput) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

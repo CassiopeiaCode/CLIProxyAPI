@@ -17,6 +17,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
+	chatcompletions "github.com/router-for-me/CLIProxyAPI/v6/internal/translator/codex/openai/chat-completions"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	coreexecutor "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/executor"
@@ -775,7 +776,7 @@ func primeRequestTranslationCache(handlerType string, rawJSON []byte) {
 	}
 	switch sdktranslator.FromString(handlerType) {
 	case sdktranslator.FormatOpenAI:
-		sdktranslator.PrimeOpenAIChatCompletionsRequest(rawJSON)
+		chatcompletions.PrimeOpenAIRequest(rawJSON)
 	}
 }
 

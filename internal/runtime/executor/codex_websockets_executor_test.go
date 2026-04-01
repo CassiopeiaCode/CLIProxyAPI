@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -172,8 +173,35 @@ func TestApplyCodexHeadersUsesConfigUserAgentForOAuth(t *testing.T) {
 	if got := req.Header.Get("User-Agent"); got != "config-ua" {
 		t.Fatalf("User-Agent = %s, want %s", got, "config-ua")
 	}
+	if got := req.Header.Get("Originator"); got != codexOriginator {
+		t.Fatalf("Originator = %s, want %s", got, codexOriginator)
+	}
 	if got := req.Header.Get("x-codex-beta-features"); got != "" {
 		t.Fatalf("x-codex-beta-features = %q, want empty", got)
+	}
+	if got := req.Header.Get("Version"); got != "" {
+		t.Fatalf("Version = %q, want empty", got)
+	}
+	if got := req.Header.Get("Accept"); got != "text/event-stream" {
+		t.Fatalf("Accept = %s, want %s", got, "text/event-stream")
+	}
+
+	var meta struct {
+		SessionID string `json:"session_id"`
+		TurnID    string `json:"turn_id"`
+		Sandbox   string `json:"sandbox"`
+	}
+	if err := json.Unmarshal([]byte(req.Header.Get("X-Codex-Turn-Metadata")), &meta); err != nil {
+		t.Fatalf("X-Codex-Turn-Metadata unmarshal error = %v", err)
+	}
+	if meta.SessionID != req.Header.Get("Session_id") {
+		t.Fatalf("turn metadata session_id = %s, want %s", meta.SessionID, req.Header.Get("Session_id"))
+	}
+	if meta.TurnID == "" {
+		t.Fatal("turn metadata turn_id is empty")
+	}
+	if meta.Sandbox != codexSandbox {
+		t.Fatalf("turn metadata sandbox = %s, want %s", meta.Sandbox, codexSandbox)
 	}
 }
 

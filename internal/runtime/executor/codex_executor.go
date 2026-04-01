@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,8 +29,10 @@ import (
 )
 
 const (
-	codexClientVersion = "0.101.0"
-	codexUserAgent     = "codex_cli_rs/0.101.0 (Mac OS 26.0.1; arm64) Apple_Terminal/464"
+	codexClientVersion = "0.118.0"
+	codexUserAgent     = "codex-tui/0.118.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.118.0)"
+	codexOriginator    = "codex-tui"
+	codexSandbox       = "seccomp"
 )
 
 var dataTag = []byte("data:")
@@ -647,7 +648,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		ginHeaders = ginCtx.Request.Header
 	}
 
-	misc.EnsureHeader(r.Header, ginHeaders, "Version", codexClientVersion)
+	misc.EnsureHeader(r.Header, ginHeaders, "Version", "")
 	misc.EnsureHeader(r.Header, ginHeaders, "Session_id", uuid.NewString())
 	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
 	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
@@ -669,7 +670,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		}
 	}
 	if !isAPIKey {
-		r.Header.Set("Originator", "codex_sdk_ts")
+		r.Header.Set("Originator", codexOriginator)
 		if auth != nil && auth.Metadata != nil {
 			if accountID, ok := auth.Metadata["account_id"].(string); ok {
 				r.Header.Set("Chatgpt-Account-Id", accountID)
@@ -711,19 +712,12 @@ func ensureCodexTurnMetadata(target http.Header, source http.Header) {
 		target.Set("Session_id", sessionID)
 	}
 
-	hash := sha256.Sum256([]byte(seed))
 	turnID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("cli-proxy-api:codex:turn:"+seed)).String()
-	sandbox := "none"
-	if hash[1]&1 == 1 {
-		sandbox = "windows_elevated"
-	}
 
 	payload := map[string]any{
+		"session_id": sessionID,
 		"turn_id": turnID,
-		"sandbox": sandbox,
-	}
-	if hash[0]%2 == 0 {
-		payload["session_id"] = sessionID
+		"sandbox": codexSandbox,
 	}
 
 	if encoded, err := json.Marshal(payload); err == nil {

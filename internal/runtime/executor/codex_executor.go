@@ -569,6 +569,8 @@ func (e *CodexExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 		}
 	}
 	if refreshToken == "" {
+		// No refresh_token: try to extract account_id from existing access_token if missing
+		e.ensureAccountIDFromAccessToken(auth)
 		return auth, nil
 	}
 	svc := codexauth.NewCodexAuth(e.cfg)
@@ -586,6 +588,9 @@ func (e *CodexExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 	}
 	if td.AccountID != "" {
 		auth.Metadata["account_id"] = td.AccountID
+	} else {
+		// Fallback: extract account_id from access_token JWT if id_token didn't provide it
+		e.ensureAccountIDFromAccessToken(auth)
 	}
 	auth.Metadata["email"] = td.Email
 	// Use unified key in files
@@ -594,6 +599,32 @@ func (e *CodexExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 	now := time.Now().Format(time.RFC3339)
 	auth.Metadata["last_refresh"] = now
 	return auth, nil
+}
+
+// ensureAccountIDFromAccessToken extracts chatgpt_account_id from the access_token JWT claims
+// and sets it in auth.Metadata["account_id"] if the field is currently empty.
+func (e *CodexExecutor) ensureAccountIDFromAccessToken(auth *cliproxyauth.Auth) {
+	if auth == nil || auth.Metadata == nil {
+		return
+	}
+	// Already has account_id
+	if existing, ok := auth.Metadata["account_id"].(string); ok && strings.TrimSpace(existing) != "" {
+		return
+	}
+	// Try access_token JWT
+	accessToken, _ := auth.Metadata["access_token"].(string)
+	if accessToken == "" {
+		return
+	}
+	claims, err := codexauth.ParseJWTToken(accessToken)
+	if err != nil || claims == nil {
+		return
+	}
+	accountID := strings.TrimSpace(claims.GetAccountID())
+	if accountID != "" {
+		auth.Metadata["account_id"] = accountID
+		log.Debugf("codex executor: extracted account_id from access_token JWT: %s", accountID[:8])
+	}
 }
 
 func (e *CodexExecutor) cacheHelper(ctx context.Context, from sdktranslator.Format, url string, req cliproxyexecutor.Request, rawJSON []byte) (*http.Request, error) {

@@ -623,7 +623,11 @@ func (e *CodexExecutor) ensureAccountIDFromAccessToken(auth *cliproxyauth.Auth) 
 	accountID := strings.TrimSpace(claims.GetAccountID())
 	if accountID != "" {
 		auth.Metadata["account_id"] = accountID
-		log.Debugf("codex executor: extracted account_id from access_token JWT: %s", accountID[:8])
+		accountIDLog := accountID
+		if len(accountIDLog) > 8 {
+			accountIDLog = accountIDLog[:8]
+		}
+		log.Debugf("codex executor: extracted account_id from access_token JWT: %s", accountIDLog)
 	}
 }
 

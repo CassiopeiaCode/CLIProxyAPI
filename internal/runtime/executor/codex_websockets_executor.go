@@ -828,7 +828,6 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 	misc.EnsureHeader(headers, ginHeaders, "x-client-request-id", "")
 	misc.EnsureHeader(headers, ginHeaders, "x-responsesapi-include-timing-metrics", "")
 	misc.EnsureHeader(headers, ginHeaders, "Version", "")
-
 	betaHeader := strings.TrimSpace(headers.Get("OpenAI-Beta"))
 	if betaHeader == "" && ginHeaders != nil {
 		betaHeader = strings.TrimSpace(ginHeaders.Get("OpenAI-Beta"))

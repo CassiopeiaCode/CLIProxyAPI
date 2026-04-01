@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,8 +31,10 @@ import (
 )
 
 const (
-	codexUserAgent  = "codex-tui/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9 (codex-tui; 0.118.0)"
-	codexOriginator = "codex-tui"
+	codexClientVersion = "0.118.0"
+	codexUserAgent     = "codex-tui/0.118.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.118.0)"
+	codexOriginator    = "codex-tui"
+	codexSandbox       = "seccomp"
 )
 
 var dataTag = []byte("data:")
@@ -762,8 +763,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		r.Header.Set("X-Codex-Beta-Features", ginHeaders.Get("X-Codex-Beta-Features"))
 	}
 	misc.EnsureHeader(r.Header, ginHeaders, "Version", "")
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Codex-Turn-Metadata", "")
-	misc.EnsureHeader(r.Header, ginHeaders, "X-Client-Request-Id", "")
+	misc.EnsureHeader(r.Header, ginHeaders, "Session_id", uuid.NewString())
 	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
 	ensureHeaderWithConfigPrecedence(r.Header, ginHeaders, "User-Agent", cfgUserAgent, codexUserAgent)
 	misc.EnsureHeader(r.Header, ginHeaders, "X-Client-Request-Id", r.Header.Get("Session_id"))
@@ -790,7 +790,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
 		r.Header.Set("Originator", originator)
 	} else if !isAPIKey {
-		r.Header.Set("Originator", "codex_sdk_ts")
+		r.Header.Set("Originator", codexOriginator)
 	}
 	if !isAPIKey {
 		if auth != nil && auth.Metadata != nil {
@@ -834,19 +834,12 @@ func ensureCodexTurnMetadata(target http.Header, source http.Header) {
 		target.Set("Session_id", sessionID)
 	}
 
-	hash := sha256.Sum256([]byte(seed))
 	turnID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("cli-proxy-api:codex:turn:"+seed)).String()
-	sandbox := "none"
-	if hash[1]&1 == 1 {
-		sandbox = "windows_elevated"
-	}
 
 	payload := map[string]any{
+		"session_id": sessionID,
 		"turn_id": turnID,
-		"sandbox": sandbox,
-	}
-	if hash[0]%2 == 0 {
-		payload["session_id"] = sessionID
+		"sandbox": codexSandbox,
 	}
 
 	if encoded, err := json.Marshal(payload); err == nil {

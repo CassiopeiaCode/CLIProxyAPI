@@ -758,6 +758,7 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 	if ginCtx, ok := r.Context().Value("gin").(*gin.Context); ok && ginCtx != nil && ginCtx.Request != nil {
 		ginHeaders = ginCtx.Request.Header
 	}
+	sourceUserAgent := firstNonEmptyTrimmed(r.Header.Get("User-Agent"), headerValue(ginHeaders, "User-Agent"))
 
 	if ginHeaders.Get("X-Codex-Beta-Features") != "" {
 		r.Header.Set("X-Codex-Beta-Features", ginHeaders.Get("X-Codex-Beta-Features"))
@@ -804,6 +805,74 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 		attrs = auth.Attributes
 	}
 	util.ApplyCustomHeadersFromAttrs(r, attrs)
+	applyCodexAuthFileUserAgent(r.Header, auth, sourceUserAgent, codexDefaultUserAgent(cfg, auth))
+}
+
+func codexAuthFileUserAgent(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return ""
+	}
+	if !strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") {
+		if auth.Metadata == nil {
+			return ""
+		}
+		if rawType, ok := auth.Metadata["type"].(string); !ok || !strings.EqualFold(strings.TrimSpace(rawType), "codex") {
+			return ""
+		}
+	}
+	if auth.Metadata == nil {
+		return ""
+	}
+	if raw, ok := auth.Metadata["cli_ua"].(string); ok {
+		return strings.TrimSpace(raw)
+	}
+	return ""
+}
+
+func applyCodexAuthFileUserAgent(headers http.Header, auth *cliproxyauth.Auth, sourceUserAgent, defaultUserAgent string) {
+	if headers == nil {
+		return
+	}
+	if ua := codexAuthFileUserAgent(auth); ua != "" {
+		headers.Set("User-Agent", ua)
+		return
+	}
+	sourceUserAgent = strings.TrimSpace(sourceUserAgent)
+	defaultUserAgent = strings.TrimSpace(defaultUserAgent)
+	if sourceUserAgent != "" && strings.Contains(strings.ToLower(sourceUserAgent), "codex") {
+		headers.Set("User-Agent", sourceUserAgent)
+		if auth != nil {
+			if auth.Metadata == nil {
+				auth.Metadata = make(map[string]any)
+			}
+			auth.Metadata["cli_ua"] = sourceUserAgent
+		}
+		return
+	}
+	if defaultUserAgent != "" {
+		headers.Set("User-Agent", defaultUserAgent)
+	}
+}
+
+func codexDefaultUserAgent(cfg *config.Config, auth *cliproxyauth.Auth) string {
+	cfgUserAgent, _ := codexHeaderDefaults(cfg, auth)
+	return firstNonEmptyTrimmed(cfgUserAgent, codexUserAgent)
+}
+
+func firstNonEmptyTrimmed(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func headerValue(headers http.Header, key string) string {
+	if headers == nil {
+		return ""
+	}
+	return headers.Get(key)
 }
 
 func ensureCodexTurnMetadata(target http.Header, source http.Header) {

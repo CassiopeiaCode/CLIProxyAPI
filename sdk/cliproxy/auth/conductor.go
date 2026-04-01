@@ -1781,8 +1781,24 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 			}
 		}
 
+		if shouldDeleteCodexUnauthorizedAuth(auth, result.Error) {
+			if m.store != nil {
+				if errDelete := m.store.Delete(ctx, auth.ID); errDelete != nil {
+					log.WithError(errDelete).Warnf("auth manager: failed to delete unauthorized codex auth %s", auth.ID)
+				} else {
+					delete(m.auths, auth.ID)
+					if m.scheduler != nil {
+						m.scheduler.removeAuth(auth.ID)
+					}
+					registry.GetGlobalRegistry().UnregisterClient(auth.ID)
+					authSnapshot = nil
+					goto afterPersist
+				}
+			}
+		}
 		_ = m.persist(ctx, auth)
 		authSnapshot = auth.Clone()
+	afterPersist:
 	}
 	m.mu.Unlock()
 	if m.scheduler != nil && authSnapshot != nil {
@@ -2077,6 +2093,60 @@ func (m *Manager) recordBlockedRequest(opts cliproxyexecutor.Options, err error)
 		return
 	}
 	m.blockedRequests.Add(hash)
+}
+
+func authHasRefreshToken(auth *Auth) bool {
+	if auth == nil || auth.Metadata == nil {
+		return false
+	}
+	if refreshToken, ok := auth.Metadata["refresh_token"].(string); ok && strings.TrimSpace(refreshToken) != "" {
+		return true
+	}
+	for _, nestedKey := range []string{"token", "Token"} {
+		nested, ok := auth.Metadata[nestedKey]
+		if !ok {
+			continue
+		}
+		switch val := nested.(type) {
+		case map[string]any:
+			if refreshToken, ok := val["refresh_token"].(string); ok && strings.TrimSpace(refreshToken) != "" {
+				return true
+			}
+		case map[string]string:
+			if refreshToken := strings.TrimSpace(val["refresh_token"]); refreshToken != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func shouldDeleteCodexUnauthorizedAuth(auth *Auth, resultErr *Error) bool {
+	if auth == nil || resultErr == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") {
+		return false
+	}
+	if resultErr.HTTPStatus != http.StatusUnauthorized {
+		return false
+	}
+	if auth.Attributes != nil {
+		if strings.EqualFold(strings.TrimSpace(auth.Attributes["runtime_only"]), "true") {
+			return false
+		}
+		if strings.TrimSpace(auth.Attributes["api_key"]) != "" {
+			return false
+		}
+	}
+	accountType, _ := auth.AccountInfo()
+	if !strings.EqualFold(strings.TrimSpace(accountType), "oauth") {
+		return false
+	}
+	if authHasRefreshToken(auth) {
+		return false
+	}
+	return true
 }
 
 func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time) {

@@ -387,6 +387,10 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 		"source":         "memory",
 		"size":           int64(0),
 	}
+	if shouldSuggestCodexAuthDeletion(auth) {
+		entry["cleanup_suggested"] = true
+		entry["cleanup_reason"] = "codex unauthorized without usable refresh token"
+	}
 	if email := authEmail(auth); email != "" {
 		entry["email"] = email
 	}
@@ -526,6 +530,38 @@ func extractCodexIDTokenClaims(auth *coreauth.Auth) gin.H {
 		return nil
 	}
 	return result
+}
+
+func shouldSuggestCodexAuthDeletion(auth *coreauth.Auth) bool {
+	if auth == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(auth.Provider), "codex") {
+		return false
+	}
+	statusMessage := strings.ToLower(strings.TrimSpace(auth.StatusMessage))
+	if !strings.Contains(statusMessage, "unauthorized") {
+		return false
+	}
+	if auth.Attributes != nil {
+		if strings.EqualFold(strings.TrimSpace(auth.Attributes["runtime_only"]), "true") {
+			return false
+		}
+		if strings.TrimSpace(auth.Attributes["api_key"]) != "" {
+			return false
+		}
+	}
+	if auth.Metadata == nil {
+		return false
+	}
+	accountType, _ := auth.AccountInfo()
+	if !strings.EqualFold(strings.TrimSpace(accountType), "oauth") {
+		return false
+	}
+	if refreshToken, ok := auth.Metadata["refresh_token"].(string); ok && strings.TrimSpace(refreshToken) != "" {
+		return false
+	}
+	return true
 }
 
 func authEmail(auth *coreauth.Auth) string {

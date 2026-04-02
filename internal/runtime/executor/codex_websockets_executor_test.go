@@ -215,6 +215,7 @@ func TestApplyCodexHeadersUsesConfigUserAgentForOAuth(t *testing.T) {
 	}
 	req = req.WithContext(contextWithGinHeaders(map[string]string{
 		"User-Agent": "client-ua",
+		"Originator": "client-originator",
 	}))
 
 	applyCodexHeaders(req, auth, "oauth-token", true, cfg)
@@ -222,8 +223,8 @@ func TestApplyCodexHeadersUsesConfigUserAgentForOAuth(t *testing.T) {
 	if got := req.Header.Get("User-Agent"); got != "config-ua" {
 		t.Fatalf("User-Agent = %s, want %s", got, "config-ua")
 	}
-	if got := req.Header.Get("Originator"); got != codexOriginator {
-		t.Fatalf("Originator = %s, want %s", got, codexOriginator)
+	if got := req.Header.Get("Originator"); got != "client-originator" {
+		t.Fatalf("Originator = %s, want %s", got, "client-originator")
 	}
 	if got := req.Header.Get("x-codex-beta-features"); got != "" {
 		t.Fatalf("x-codex-beta-features = %q, want empty", got)
@@ -251,6 +252,54 @@ func TestApplyCodexHeadersUsesConfigUserAgentForOAuth(t *testing.T) {
 	}
 	if meta.Sandbox != codexSandbox {
 		t.Fatalf("turn metadata sandbox = %s, want %s", meta.Sandbox, codexSandbox)
+	}
+}
+
+func TestApplyCodexHeadersPassesThroughClientOriginator(t *testing.T) {
+	req, err := http.NewRequest(http.MethodPost, "https://example.com/responses", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	auth := &cliproxyauth.Auth{
+		Provider: "codex",
+		Metadata: map[string]any{"email": "user@example.com"},
+	}
+	req = req.WithContext(contextWithGinHeaders(map[string]string{
+		"Originator": "Codex Desktop",
+	}))
+
+	applyCodexHeaders(req, auth, "oauth-token", true, nil)
+
+	if got := req.Header.Get("Originator"); got != "Codex Desktop" {
+		t.Fatalf("Originator = %s, want %s", got, "Codex Desktop")
+	}
+}
+
+func TestApplyCodexWebsocketHeadersPassesThroughClientIdentityHeaders(t *testing.T) {
+	auth := &cliproxyauth.Auth{
+		Provider: "codex",
+		Metadata: map[string]any{"email": "user@example.com"},
+	}
+	ctx := contextWithGinHeaders(map[string]string{
+		"Originator":            "Codex Desktop",
+		"Version":               "0.115.0-alpha.27",
+		"X-Codex-Turn-Metadata": `{"turn_id":"turn-1"}`,
+		"X-Client-Request-Id":   "019d2233-e240-7162-992d-38df0a2a0e0d",
+	})
+
+	headers := applyCodexWebsocketHeaders(ctx, http.Header{}, auth, "", nil)
+
+	if got := headers.Get("Originator"); got != "Codex Desktop" {
+		t.Fatalf("Originator = %s, want %s", got, "Codex Desktop")
+	}
+	if got := headers.Get("Version"); got != "0.115.0-alpha.27" {
+		t.Fatalf("Version = %s, want %s", got, "0.115.0-alpha.27")
+	}
+	if got := headers.Get("X-Codex-Turn-Metadata"); got != `{"turn_id":"turn-1"}` {
+		t.Fatalf("X-Codex-Turn-Metadata = %s, want %s", got, `{"turn_id":"turn-1"}`)
+	}
+	if got := headers.Get("X-Client-Request-Id"); got != "019d2233-e240-7162-992d-38df0a2a0e0d" {
+		t.Fatalf("X-Client-Request-Id = %s, want %s", got, "019d2233-e240-7162-992d-38df0a2a0e0d")
 	}
 }
 

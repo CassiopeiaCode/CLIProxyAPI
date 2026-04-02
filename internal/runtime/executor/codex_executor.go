@@ -788,9 +788,10 @@ func applyCodexHeaders(r *http.Request, auth *cliproxyauth.Auth, token string, s
 			isAPIKey = true
 		}
 	}
-	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
+	if originator := strings.TrimSpace(headerValue(ginHeaders, "Originator")); originator != "" {
 		r.Header.Set("Originator", originator)
-	} else if !isAPIKey {
+	}
+	if !isAPIKey && strings.TrimSpace(r.Header.Get("Originator")) == "" {
 		r.Header.Set("Originator", codexOriginator)
 	}
 	if !isAPIKey {

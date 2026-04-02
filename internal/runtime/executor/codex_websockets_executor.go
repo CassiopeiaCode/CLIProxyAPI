@@ -848,9 +848,10 @@ func applyCodexWebsocketHeaders(ctx context.Context, headers http.Header, auth *
 			isAPIKey = true
 		}
 	}
-	if originator := strings.TrimSpace(ginHeaders.Get("Originator")); originator != "" {
+	if originator := strings.TrimSpace(headerValue(ginHeaders, "Originator")); originator != "" {
 		headers.Set("Originator", originator)
-	} else if !isAPIKey {
+	}
+	if !isAPIKey && strings.TrimSpace(headers.Get("Originator")) == "" {
 		headers.Set("Originator", codexOriginator)
 	}
 	if !isAPIKey {

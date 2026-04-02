@@ -47,6 +47,33 @@ func TestEnsureRequestSimHashMetadataOnlyForSimHashSelector(t *testing.T) {
 	}
 }
 
+func TestEnsureRequestBodyAnalysisMetadataKeepsOnlyLightweightFields(t *testing.T) {
+	opts := cliproxyexecutor.Options{
+		OriginalRequest: []byte(`{"messages":[{"role":"user","content":"hello world"}],"stream":true,"model":"gpt-5.4"}`),
+	}
+
+	updated, analysis, ok := ensureRequestBodyAnalysisMetadata(opts)
+	if !ok || analysis == nil {
+		t.Fatal("expected request body analysis metadata")
+	}
+	if analysis.requestHash == "" {
+		t.Fatal("expected request hash to be present")
+	}
+	if !analysis.hasSimHash {
+		t.Fatal("expected simhash to be present")
+	}
+	if stored, ok := requestBodyAnalysisFromMetadata(updated.Metadata); !ok || stored == nil {
+		t.Fatal("expected metadata to store request body analysis")
+	} else {
+		if stored.requestHash == "" {
+			t.Fatal("stored request hash should not be empty")
+		}
+		if !stored.hasSimHash {
+			t.Fatal("stored simhash should be present")
+		}
+	}
+}
+
 func TestMarkResultUpdatesSimHashOnFailure(t *testing.T) {
 	manager := NewManager(nil, &RoundRobinSelector{}, nil)
 	manager.auths["auth-1"] = &Auth{ID: "auth-1", Provider: "codex", Status: StatusActive}

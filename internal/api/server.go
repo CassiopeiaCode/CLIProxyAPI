@@ -176,6 +176,8 @@ type Server struct {
 	keepAliveOnTimeout func()
 	keepAliveHeartbeat chan struct{}
 	keepAliveStop      chan struct{}
+
+	memoryLimiter *memoryConcurrencyLimiter
 }
 
 // NewServer creates and initializes a new API server instance.
@@ -251,6 +253,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 		currentPath:         wd,
 		envManagementSecret: envManagementSecret,
 		wsRoutes:            make(map[string]struct{}),
+		memoryLimiter:       newMemoryConcurrencyLimiter(cfg.MemoryConcurrency),
 	}
 	s.wsAuthEnabled.Store(cfg.WebsocketAuth)
 	// Save initial YAML snapshot
@@ -327,6 +330,9 @@ func (s *Server) setupRoutes() {
 	// OpenAI compatible API routes
 	v1 := s.engine.Group("/v1")
 	v1.Use(AuthMiddleware(s.accessManager))
+	if mw := s.apiMemoryConcurrencyMiddleware(); mw != nil {
+		v1.Use(mw)
+	}
 	{
 		v1.GET("/models", s.unifiedModelsHandler(openaiHandlers, claudeCodeHandlers))
 		v1.POST("/chat/completions", openaiHandlers.ChatCompletions)
@@ -341,6 +347,9 @@ func (s *Server) setupRoutes() {
 	// Gemini compatible API routes
 	v1beta := s.engine.Group("/v1beta")
 	v1beta.Use(AuthMiddleware(s.accessManager))
+	if mw := s.apiMemoryConcurrencyMiddleware(); mw != nil {
+		v1beta.Use(mw)
+	}
 	{
 		v1beta.GET("/models", geminiHandlers.GeminiModels)
 		v1beta.POST("/models/*action", geminiHandlers.GeminiHandler)
@@ -358,7 +367,11 @@ func (s *Server) setupRoutes() {
 			},
 		})
 	})
-	s.engine.POST("/v1internal:method", geminiCLIHandlers.CLIHandler)
+	if mw := s.apiMemoryConcurrencyMiddleware(); mw != nil {
+		s.engine.POST("/v1internal:method", mw, geminiCLIHandlers.CLIHandler)
+	} else {
+		s.engine.POST("/v1internal:method", geminiCLIHandlers.CLIHandler)
+	}
 
 	// OAuth callback endpoints (reuse main server port)
 	// These endpoints receive provider redirects and persist
@@ -780,6 +793,13 @@ func (s *Server) unifiedModelsHandler(openaiHandler *openai.OpenAIAPIHandler, cl
 	}
 }
 
+func (s *Server) apiMemoryConcurrencyMiddleware() gin.HandlerFunc {
+	if s == nil || s.memoryLimiter == nil {
+		return nil
+	}
+	return s.memoryLimiter.middleware()
+}
+
 // Start begins listening for and serving HTTP or HTTPS requests.
 // It's a blocking call and will only return on an unrecoverable error.
 //
@@ -828,6 +848,9 @@ func (s *Server) Stop(ctx context.Context) error {
 		case s.keepAliveStop <- struct{}{}:
 		default:
 		}
+	}
+	if s.memoryLimiter != nil {
+		s.memoryLimiter.close()
 	}
 
 	// Shutdown the HTTP server.
@@ -912,6 +935,9 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 
 	if oldCfg == nil || oldCfg.DisableCooling != cfg.DisableCooling {
 		auth.SetQuotaCooldownDisabled(cfg.DisableCooling)
+	}
+	if s.memoryLimiter != nil {
+		s.memoryLimiter.applyConfig(cfg.MemoryConcurrency)
 	}
 
 	if s.handlers != nil && s.handlers.AuthManager != nil {

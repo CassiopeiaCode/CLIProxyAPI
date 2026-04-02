@@ -45,6 +45,21 @@ pprof:
   enable: false
   addr: "127.0.0.1:8316"
 
+# Adaptive request concurrency using process RSS as the control signal.
+# Every check interval:
+# - if RSS > target-memory-mb, concurrency decreases by 1
+# - if RSS < target-memory-mb, concurrency increases by 1
+# New requests wait until concurrency is below the current limit, then fail with 429
+# after wait-timeout-seconds.
+memory-concurrency:
+  enable: false
+  target-memory-mb: 256
+  initial-concurrency: 8
+  min-concurrency: 1
+  max-concurrency: 64
+  wait-timeout-seconds: 10
+  check-interval-seconds: 1
+
 # When true, disable high-overhead HTTP middleware features to reduce per-request memory usage under high concurrency.
 commercial-mode: false
 

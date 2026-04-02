@@ -47,6 +47,9 @@ type Config struct {
 	// Pprof config controls the optional pprof HTTP debug server.
 	Pprof PprofConfig `yaml:"pprof" json:"pprof"`
 
+	// MemoryConcurrency dynamically adjusts request concurrency based on process RSS.
+	MemoryConcurrency MemoryConcurrencyConfig `yaml:"memory-concurrency" json:"memory-concurrency"`
+
 	// CommercialMode disables high-overhead HTTP middleware features to minimize per-request memory usage.
 	CommercialMode bool `yaml:"commercial-mode" json:"commercial-mode"`
 
@@ -149,6 +152,24 @@ type PprofConfig struct {
 	Enable bool `yaml:"enable" json:"enable"`
 	// Addr is the host:port address for the pprof HTTP server.
 	Addr string `yaml:"addr" json:"addr"`
+}
+
+// MemoryConcurrencyConfig throttles request concurrency using a memory feedback loop.
+type MemoryConcurrencyConfig struct {
+	// Enable toggles adaptive request gating.
+	Enable bool `yaml:"enable" json:"enable"`
+	// TargetMemoryMB is the desired RSS ceiling in megabytes.
+	TargetMemoryMB int `yaml:"target-memory-mb" json:"target-memory-mb"`
+	// InitialConcurrency is the starting request concurrency.
+	InitialConcurrency int `yaml:"initial-concurrency" json:"initial-concurrency"`
+	// MinConcurrency is the lowest allowed request concurrency.
+	MinConcurrency int `yaml:"min-concurrency" json:"min-concurrency"`
+	// MaxConcurrency is the highest allowed request concurrency.
+	MaxConcurrency int `yaml:"max-concurrency" json:"max-concurrency"`
+	// WaitTimeoutSeconds is how long a new request may wait for a slot before returning 429.
+	WaitTimeoutSeconds int `yaml:"wait-timeout-seconds" json:"wait-timeout-seconds"`
+	// CheckIntervalSeconds is the memory sampling interval.
+	CheckIntervalSeconds int `yaml:"check-interval-seconds" json:"check-interval-seconds"`
 }
 
 // RemoteManagement holds management API configuration under 'remote-management'.
@@ -569,6 +590,12 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.DisableCooling = false
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
+	cfg.MemoryConcurrency.Enable = false
+	cfg.MemoryConcurrency.InitialConcurrency = 8
+	cfg.MemoryConcurrency.MinConcurrency = 1
+	cfg.MemoryConcurrency.MaxConcurrency = 64
+	cfg.MemoryConcurrency.WaitTimeoutSeconds = 10
+	cfg.MemoryConcurrency.CheckIntervalSeconds = 1
 	cfg.AmpCode.RestrictManagementToLocalhost = false // Default to false: API key auth is sufficient
 	cfg.RemoteManagement.PanelGitHubRepository = DefaultPanelGitHubRepository
 	if err = yaml.Unmarshal(data, &cfg); err != nil {
@@ -617,6 +644,34 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.Pprof.Addr = strings.TrimSpace(cfg.Pprof.Addr)
 	if cfg.Pprof.Addr == "" {
 		cfg.Pprof.Addr = DefaultPprofAddr
+	}
+
+	if cfg.MemoryConcurrency.InitialConcurrency <= 0 {
+		cfg.MemoryConcurrency.InitialConcurrency = 8
+	}
+	if cfg.MemoryConcurrency.MinConcurrency <= 0 {
+		cfg.MemoryConcurrency.MinConcurrency = 1
+	}
+	if cfg.MemoryConcurrency.MaxConcurrency <= 0 {
+		cfg.MemoryConcurrency.MaxConcurrency = 64
+	}
+	if cfg.MemoryConcurrency.MaxConcurrency < cfg.MemoryConcurrency.MinConcurrency {
+		cfg.MemoryConcurrency.MaxConcurrency = cfg.MemoryConcurrency.MinConcurrency
+	}
+	if cfg.MemoryConcurrency.InitialConcurrency < cfg.MemoryConcurrency.MinConcurrency {
+		cfg.MemoryConcurrency.InitialConcurrency = cfg.MemoryConcurrency.MinConcurrency
+	}
+	if cfg.MemoryConcurrency.InitialConcurrency > cfg.MemoryConcurrency.MaxConcurrency {
+		cfg.MemoryConcurrency.InitialConcurrency = cfg.MemoryConcurrency.MaxConcurrency
+	}
+	if cfg.MemoryConcurrency.WaitTimeoutSeconds <= 0 {
+		cfg.MemoryConcurrency.WaitTimeoutSeconds = 10
+	}
+	if cfg.MemoryConcurrency.CheckIntervalSeconds <= 0 {
+		cfg.MemoryConcurrency.CheckIntervalSeconds = 1
+	}
+	if cfg.MemoryConcurrency.TargetMemoryMB <= 0 {
+		cfg.MemoryConcurrency.Enable = false
 	}
 
 	if cfg.LogsMaxTotalSizeMB < 0 {

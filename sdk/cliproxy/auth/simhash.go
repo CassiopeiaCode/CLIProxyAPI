@@ -24,10 +24,9 @@ const (
 )
 
 type requestBodyAnalysis struct {
-	parsed        any
-	canonicalJSON []byte
-	simHash       uint64
-	hasSimHash    bool
+	requestHash string
+	simHash     uint64
+	hasSimHash  bool
 }
 
 func ensureRequestSimHashMetadata(opts cliproxyexecutor.Options, selector Selector) cliproxyexecutor.Options {
@@ -111,9 +110,11 @@ func ensureRequestBodyAnalysisMetadata(opts cliproxyexecutor.Options) (cliproxye
 	if err := json.Unmarshal(opts.OriginalRequest, &value); err != nil {
 		return opts, nil, false
 	}
-	analysis := &requestBodyAnalysis{parsed: value}
+	analysis := &requestBodyAnalysis{}
 	if encoded, err := json.Marshal(value); err == nil && len(encoded) > 0 {
-		analysis.canonicalJSON = encoded
+		if hash, ok := requestBodyHash(encoded); ok {
+			analysis.requestHash = hash
+		}
 	}
 	analysis.simHash, analysis.hasSimHash = requestSimHashFromParsed(value)
 	meta := cloneMetadataWithExtra(opts.Metadata, 1)

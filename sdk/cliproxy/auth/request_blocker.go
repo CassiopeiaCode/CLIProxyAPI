@@ -3,6 +3,7 @@ package auth
 import (
 	"container/list"
 	"crypto/sha256"
+	"encoding/json"
 	"encoding/hex"
 	"sync"
 
@@ -77,21 +78,26 @@ func requestBodyHash(payload []byte) (string, bool) {
 	if len(payload) == 0 {
 		return "", false
 	}
+	var value any
+	if err := json.Unmarshal(payload, &value); err == nil {
+		if encoded, err := json.Marshal(value); err == nil && len(encoded) > 0 {
+			sum := sha256.Sum256(encoded)
+			return hex.EncodeToString(sum[:]), true
+		}
+	}
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), true
 }
 
 func requestBodyHashFromOptions(opts cliproxyexecutor.Options) (cliproxyexecutor.Options, string, bool) {
 	if analysis, ok := requestBodyAnalysisFromMetadata(opts.Metadata); ok {
-		if len(analysis.canonicalJSON) > 0 {
-			hash, ok := requestBodyHash(analysis.canonicalJSON)
-			return opts, hash, ok
+		if analysis.requestHash != "" {
+			return opts, analysis.requestHash, true
 		}
 	}
 	updated, analysis, ok := ensureRequestBodyAnalysisMetadata(opts)
-	if ok && analysis != nil && len(analysis.canonicalJSON) > 0 {
-		hash, ok := requestBodyHash(analysis.canonicalJSON)
-		return updated, hash, ok
+	if ok && analysis != nil && analysis.requestHash != "" {
+		return updated, analysis.requestHash, true
 	}
 	hash, ok := requestBodyHash(opts.OriginalRequest)
 	return updated, hash, ok

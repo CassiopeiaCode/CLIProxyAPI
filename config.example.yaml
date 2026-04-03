@@ -50,7 +50,7 @@ pprof:
 # - if RSS > target-memory-mb, concurrency decreases by 1
 # - if RSS < target-memory-mb, concurrency increases by 1
 # New requests wait until concurrency is below the current limit, then fail with 429
-# after wait-timeout-seconds.
+# after wait-timeout-seconds. Supports fractional seconds; set to 0 to fail immediately.
 memory-concurrency:
   enable: false
   target-memory-mb: 256

@@ -18,12 +18,12 @@ import (
 var errMemoryConcurrencyTimeout = errors.New("memory concurrency wait timeout")
 
 type memoryConcurrencyLimiter struct {
-	mu      sync.Mutex
-	cfg     config.MemoryConcurrencyConfig
-	limit   int
+	mu       sync.Mutex
+	cfg      config.MemoryConcurrencyConfig
+	limit    int
 	inflight int
-	waitCh  chan struct{}
-	stopCh  chan struct{}
+	waitCh   chan struct{}
+	stopCh   chan struct{}
 }
 
 func newMemoryConcurrencyLimiter(cfg config.MemoryConcurrencyConfig) *memoryConcurrencyLimiter {
@@ -84,7 +84,7 @@ func (l *memoryConcurrencyLimiter) acquire(ctx context.Context) (func(), error) 
 		waitCh := l.waitCh
 		stopCh := l.stopCh
 		if deadline.IsZero() {
-			deadline = time.Now().Add(time.Duration(cfg.WaitTimeoutSeconds) * time.Second)
+			deadline = time.Now().Add(time.Duration(cfg.WaitTimeoutSeconds * float64(time.Second)))
 		}
 		remaining := time.Until(deadline)
 		l.mu.Unlock()

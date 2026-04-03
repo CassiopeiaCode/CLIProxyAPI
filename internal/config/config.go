@@ -179,7 +179,8 @@ type MemoryConcurrencyConfig struct {
 	// MaxConcurrency is the highest allowed request concurrency.
 	MaxConcurrency int `yaml:"max-concurrency" json:"max-concurrency"`
 	// WaitTimeoutSeconds is how long a new request may wait for a slot before returning 429.
-	WaitTimeoutSeconds int `yaml:"wait-timeout-seconds" json:"wait-timeout-seconds"`
+	// Zero means fail immediately without waiting.
+	WaitTimeoutSeconds float64 `yaml:"wait-timeout-seconds" json:"wait-timeout-seconds"`
 	// CheckIntervalSeconds is the memory sampling interval.
 	CheckIntervalSeconds int `yaml:"check-interval-seconds" json:"check-interval-seconds"`
 }
@@ -676,7 +677,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	if cfg.MemoryConcurrency.InitialConcurrency > cfg.MemoryConcurrency.MaxConcurrency {
 		cfg.MemoryConcurrency.InitialConcurrency = cfg.MemoryConcurrency.MaxConcurrency
 	}
-	if cfg.MemoryConcurrency.WaitTimeoutSeconds <= 0 {
+	if cfg.MemoryConcurrency.WaitTimeoutSeconds < 0 {
 		cfg.MemoryConcurrency.WaitTimeoutSeconds = 10
 	}
 	if cfg.MemoryConcurrency.CheckIntervalSeconds <= 0 {

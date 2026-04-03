@@ -103,11 +103,12 @@ func ensureRequestBodyAnalysisMetadata(opts cliproxyexecutor.Options) (cliproxye
 	if analysis, ok := requestBodyAnalysisFromMetadata(opts.Metadata); ok {
 		return opts, analysis, true
 	}
-	if len(opts.OriginalRequest) == 0 {
+	originalRequest := opts.OriginalRequestOr(nil)
+	if len(originalRequest) == 0 {
 		return opts, nil, false
 	}
 	var value any
-	if err := json.Unmarshal(opts.OriginalRequest, &value); err != nil {
+	if err := json.Unmarshal(originalRequest, &value); err != nil {
 		return opts, nil, false
 	}
 	analysis := &requestBodyAnalysis{}

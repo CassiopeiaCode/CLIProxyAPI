@@ -116,10 +116,7 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	// Official Gemini API via API key or OAuth bearer
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("gemini")
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, false)
 	body := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, false)
@@ -204,7 +201,7 @@ func (e *GeminiExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 	appendAPIResponseChunk(ctx, e.cfg, data)
 	reporter.publish(ctx, parseGeminiUsage(data))
 	var param any
-	out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, opts.OriginalRequest, body, data, &param)
+	out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, data, &param)
 	resp = cliproxyexecutor.Response{Payload: []byte(out), Headers: httpResp.Header.Clone()}
 	return resp, nil
 }
@@ -223,10 +220,7 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("gemini")
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, true)
 	body := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, true)
@@ -319,12 +313,12 @@ func (e *GeminiExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 			if detail, ok := parseGeminiStreamUsage(payload); ok {
 				reporter.publish(ctx, detail)
 			}
-			lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, body, bytes.Clone(payload), &param)
+			lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, bytes.Clone(payload), &param)
 			for i := range lines {
 				out <- cliproxyexecutor.StreamChunk{Payload: []byte(lines[i])}
 			}
 		}
-		lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, body, []byte("[DONE]"), &param)
+		lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, []byte("[DONE]"), &param)
 		for i := range lines {
 			out <- cliproxyexecutor.StreamChunk{Payload: []byte(lines[i])}
 		}

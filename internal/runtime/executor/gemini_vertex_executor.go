@@ -319,9 +319,7 @@ func (e *GeminiVertexExecutor) executeWithServiceAccount(ctx context.Context, au
 		to := sdktranslator.FromString("gemini")
 
 		originalPayloadSource := req.Payload
-		if len(opts.OriginalRequest) > 0 {
-			originalPayloadSource = opts.OriginalRequest
-		}
+		originalPayloadSource = originalRequestOr(opts, originalPayloadSource)
 		originalPayload := originalPayloadSource
 		originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, false)
 		body = sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, false)
@@ -418,7 +416,7 @@ func (e *GeminiVertexExecutor) executeWithServiceAccount(ctx context.Context, au
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("gemini")
 	var param any
-	out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, opts.OriginalRequest, body, data, &param)
+	out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, data, &param)
 	resp = cliproxyexecutor.Response{Payload: []byte(out), Headers: httpResp.Header.Clone()}
 	return resp, nil
 }
@@ -433,10 +431,7 @@ func (e *GeminiVertexExecutor) executeWithAPIKey(ctx context.Context, auth *clip
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("gemini")
 
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, false)
 	body := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, false)
@@ -523,7 +518,7 @@ func (e *GeminiVertexExecutor) executeWithAPIKey(ctx context.Context, auth *clip
 	appendAPIResponseChunk(ctx, e.cfg, data)
 	reporter.publish(ctx, parseGeminiUsage(data))
 	var param any
-	out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, opts.OriginalRequest, body, data, &param)
+	out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, data, &param)
 	resp = cliproxyexecutor.Response{Payload: []byte(out), Headers: httpResp.Header.Clone()}
 	return resp, nil
 }
@@ -538,10 +533,7 @@ func (e *GeminiVertexExecutor) executeStreamWithServiceAccount(ctx context.Conte
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("gemini")
 
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, true)
 	body := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, true)
@@ -634,12 +626,12 @@ func (e *GeminiVertexExecutor) executeStreamWithServiceAccount(ctx context.Conte
 			if detail, ok := parseGeminiStreamUsage(line); ok {
 				reporter.publish(ctx, detail)
 			}
-			lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, body, bytes.Clone(line), &param)
+			lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, bytes.Clone(line), &param)
 			for i := range lines {
 				out <- cliproxyexecutor.StreamChunk{Payload: []byte(lines[i])}
 			}
 		}
-		lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, body, []byte("[DONE]"), &param)
+		lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, []byte("[DONE]"), &param)
 		for i := range lines {
 			out <- cliproxyexecutor.StreamChunk{Payload: []byte(lines[i])}
 		}
@@ -662,10 +654,7 @@ func (e *GeminiVertexExecutor) executeStreamWithAPIKey(ctx context.Context, auth
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("gemini")
 
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, true)
 	body := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, true)
@@ -758,12 +747,12 @@ func (e *GeminiVertexExecutor) executeStreamWithAPIKey(ctx context.Context, auth
 			if detail, ok := parseGeminiStreamUsage(line); ok {
 				reporter.publish(ctx, detail)
 			}
-			lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, body, bytes.Clone(line), &param)
+			lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, bytes.Clone(line), &param)
 			for i := range lines {
 				out <- cliproxyexecutor.StreamChunk{Payload: []byte(lines[i])}
 			}
 		}
-		lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, body, []byte("[DONE]"), &param)
+		lines := sdktranslator.TranslateStream(ctx, to, from, req.Model, originalRequestBytes(opts), body, []byte("[DONE]"), &param)
 		for i := range lines {
 			out <- cliproxyexecutor.StreamChunk{Payload: []byte(lines[i])}
 		}

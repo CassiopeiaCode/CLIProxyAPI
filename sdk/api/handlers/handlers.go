@@ -51,6 +51,7 @@ const idempotencyKeyMetadataKey = "idempotency_key"
 const (
 	defaultStreamingKeepAliveSeconds = 0
 	defaultStreamingBootstrapRetries = 0
+	defaultOriginalRequestSpoolBytes = 1 << 20
 )
 
 type pinnedAuthContextKey struct{}
@@ -466,6 +467,20 @@ func appendAPIResponse(c *gin.Context, data []byte) {
 	c.Set("API_RESPONSE", bytes.Clone(data))
 }
 
+func prepareOriginalRequestOptions(rawJSON []byte) ([]byte, *coreexecutor.OriginalRequestBody) {
+	if len(rawJSON) == 0 {
+		return nil, nil
+	}
+	if len(rawJSON) <= defaultOriginalRequestSpoolBytes {
+		return rawJSON, nil
+	}
+	body, err := coreexecutor.NewOriginalRequestBody(rawJSON, defaultOriginalRequestSpoolBytes)
+	if err != nil || body == nil {
+		return rawJSON, nil
+	}
+	return nil, body
+}
+
 // ExecuteWithAuthManager executes a non-streaming request via the core auth manager.
 // This path is the only supported execution route.
 func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType, modelName string, rawJSON []byte, alt string) ([]byte, http.Header, *interfaces.ErrorMessage) {
@@ -484,11 +499,16 @@ func (h *BaseAPIHandler) ExecuteWithAuthManager(ctx context.Context, handlerType
 		Model:   normalizedModel,
 		Payload: payload,
 	}
+	originalRequest, originalRequestBody := prepareOriginalRequestOptions(rawJSON)
+	if originalRequestBody != nil {
+		defer func() { _ = originalRequestBody.Cleanup() }()
+	}
 	opts := coreexecutor.Options{
-		Stream:          false,
-		Alt:             alt,
-		OriginalRequest: rawJSON,
-		SourceFormat:    sdktranslator.FromString(handlerType),
+		Stream:              false,
+		Alt:                 alt,
+		OriginalRequest:     originalRequest,
+		OriginalRequestBody: originalRequestBody,
+		SourceFormat:        sdktranslator.FromString(handlerType),
 	}
 	opts.Metadata = reqMeta
 	resp, err := h.AuthManager.Execute(ctx, providers, req, opts)
@@ -531,11 +551,16 @@ func (h *BaseAPIHandler) ExecuteCountWithAuthManager(ctx context.Context, handle
 		Model:   normalizedModel,
 		Payload: payload,
 	}
+	originalRequest, originalRequestBody := prepareOriginalRequestOptions(rawJSON)
+	if originalRequestBody != nil {
+		defer func() { _ = originalRequestBody.Cleanup() }()
+	}
 	opts := coreexecutor.Options{
-		Stream:          false,
-		Alt:             alt,
-		OriginalRequest: rawJSON,
-		SourceFormat:    sdktranslator.FromString(handlerType),
+		Stream:              false,
+		Alt:                 alt,
+		OriginalRequest:     originalRequest,
+		OriginalRequestBody: originalRequestBody,
+		SourceFormat:        sdktranslator.FromString(handlerType),
 	}
 	opts.Metadata = reqMeta
 	resp, err := h.AuthManager.ExecuteCount(ctx, providers, req, opts)
@@ -582,15 +607,20 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 		Model:   normalizedModel,
 		Payload: payload,
 	}
+	originalRequest, originalRequestBody := prepareOriginalRequestOptions(rawJSON)
 	opts := coreexecutor.Options{
-		Stream:          true,
-		Alt:             alt,
-		OriginalRequest: rawJSON,
-		SourceFormat:    sdktranslator.FromString(handlerType),
+		Stream:              true,
+		Alt:                 alt,
+		OriginalRequest:     originalRequest,
+		OriginalRequestBody: originalRequestBody,
+		SourceFormat:        sdktranslator.FromString(handlerType),
 	}
 	opts.Metadata = reqMeta
 	streamResult, err := h.AuthManager.ExecuteStream(ctx, providers, req, opts)
 	if err != nil {
+		if originalRequestBody != nil {
+			_ = originalRequestBody.Cleanup()
+		}
 		errChan := make(chan *interfaces.ErrorMessage, 1)
 		status := http.StatusInternalServerError
 		if se, ok := err.(interface{ StatusCode() int }); ok && se != nil {
@@ -622,6 +652,9 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 	dataChan := make(chan []byte)
 	errChan := make(chan *interfaces.ErrorMessage, 1)
 	go func() {
+		if originalRequestBody != nil {
+			defer func() { _ = originalRequestBody.Cleanup() }()
+		}
 		defer close(dataChan)
 		defer close(errChan)
 		sentPayload := false

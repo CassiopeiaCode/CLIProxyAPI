@@ -81,7 +81,7 @@ func WithRequest(ctx context.Context, opts coreexecutor.Options, req coreexecuto
 		stream:         opts.Stream,
 		requestedModel: strings.TrimSpace(req.Model),
 		requestHeaders: cloneHeader(opts.Headers),
-		clientRequest:  compactAndTruncateCopy(opts.OriginalRequest, maxBodyBytes),
+		clientRequest:  compactAndTruncateCopy(opts.OriginalRequestOr(nil), maxBodyBytes),
 	}
 	if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil {
 		state.requestID = strings.TrimSpace(ginCtx.GetString("REQUEST_ID"))

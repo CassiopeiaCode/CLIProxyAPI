@@ -800,13 +800,8 @@ func validateSSEDataJSON(chunk []byte) error {
 }
 
 func primeRequestTranslationCache(handlerType string, rawJSON []byte) {
-	if len(rawJSON) == 0 {
-		return
-	}
-	switch sdktranslator.FromString(handlerType) {
-	case sdktranslator.FormatOpenAI:
-		chatcompletions.PrimeOpenAIRequest(rawJSON)
-	}
+	_ = handlerType
+	_ = rawJSON
 }
 
 func statusFromError(err error) int {

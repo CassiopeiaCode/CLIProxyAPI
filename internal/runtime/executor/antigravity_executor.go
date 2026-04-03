@@ -693,10 +693,7 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("antigravity")
 
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalPayload, errValidate := validateAntigravityRequestSignatures(from, originalPayload)
 	if errValidate != nil {
@@ -870,13 +867,13 @@ attemptLoop:
 				return resp, err
 			}
 
-			reporter.Publish(ctx, helps.ParseAntigravityUsage(bodyBytes))
-			var param any
-			converted := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, opts.OriginalRequest, translated, bodyBytes, &param)
-			resp = cliproxyexecutor.Response{Payload: converted, Headers: httpResp.Header.Clone()}
-			reporter.EnsurePublished(ctx)
-			return resp, nil
-		}
+				reporter.Publish(ctx, helps.ParseAntigravityUsage(bodyBytes))
+				var param any
+				converted := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, originalRequestBytes(opts), translated, bodyBytes, &param)
+				resp = cliproxyexecutor.Response{Payload: converted, Headers: httpResp.Header.Clone()}
+				reporter.EnsurePublished(ctx)
+				return resp, nil
+			}
 
 		switch {
 		case lastStatus != 0:
@@ -907,10 +904,7 @@ func (e *AntigravityExecutor) executeClaudeNonStream(ctx context.Context, auth *
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("antigravity")
 
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalPayload, errValidate := validateAntigravityRequestSignatures(from, originalPayload)
 	if errValidate != nil {
@@ -1136,14 +1130,14 @@ attemptLoop:
 			}
 			resp = cliproxyexecutor.Response{Payload: e.convertStreamToNonStream(buffer.Bytes())}
 
-			reporter.Publish(ctx, helps.ParseAntigravityUsage(resp.Payload))
-			var param any
-			converted := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, opts.OriginalRequest, translated, resp.Payload, &param)
-			resp = cliproxyexecutor.Response{Payload: converted, Headers: httpResp.Header.Clone()}
-			reporter.EnsurePublished(ctx)
+				reporter.Publish(ctx, helps.ParseAntigravityUsage(resp.Payload))
+				var param any
+				converted := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, originalRequestBytes(opts), translated, resp.Payload, &param)
+				resp = cliproxyexecutor.Response{Payload: converted, Headers: httpResp.Header.Clone()}
+				reporter.EnsurePublished(ctx)
 
-			return resp, nil
-		}
+				return resp, nil
+			}
 
 		switch {
 		case lastStatus != 0:
@@ -1372,10 +1366,7 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("antigravity")
 
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalPayload, errValidate := validateAntigravityRequestSignatures(from, originalPayload)
 	if errValidate != nil {
@@ -1578,12 +1569,12 @@ attemptLoop:
 						reporter.Publish(ctx, detail)
 					}
 
-					chunks := sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, translated, bytes.Clone(payload), &param)
+					chunks := sdktranslator.TranslateStream(ctx, to, from, req.Model, originalRequestBytes(opts), translated, bytes.Clone(payload), &param)
 					for i := range chunks {
 						out <- cliproxyexecutor.StreamChunk{Payload: chunks[i]}
 					}
 				}
-				tail := sdktranslator.TranslateStream(ctx, to, from, req.Model, opts.OriginalRequest, translated, []byte("[DONE]"), &param)
+				tail := sdktranslator.TranslateStream(ctx, to, from, req.Model, originalRequestBytes(opts), translated, []byte("[DONE]"), &param)
 				for i := range tail {
 					out <- cliproxyexecutor.StreamChunk{Payload: tail[i]}
 				}

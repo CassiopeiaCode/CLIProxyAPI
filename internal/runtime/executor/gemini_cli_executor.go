@@ -124,10 +124,7 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("gemini-cli")
 
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, false)
 	basePayload := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, false)
@@ -227,13 +224,13 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 			return resp, err
 		}
 		helps.AppendAPIResponseChunk(ctx, e.cfg, data)
-		if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
-			reporter.Publish(ctx, helps.ParseGeminiCLIUsage(data))
-			var param any
-			out := sdktranslator.TranslateNonStream(respCtx, to, from, attemptModel, opts.OriginalRequest, payload, data, &param)
-			resp = cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}
-			return resp, nil
-		}
+			if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+				reporter.Publish(ctx, helps.ParseGeminiCLIUsage(data))
+				var param any
+				out := sdktranslator.TranslateNonStream(respCtx, to, from, attemptModel, originalRequestBytes(opts), payload, data, &param)
+				resp = cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}
+				return resp, nil
+			}
 
 		lastStatus = httpResp.StatusCode
 		lastBody = append([]byte(nil), data...)
@@ -279,10 +276,7 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	from := opts.SourceFormat
 	to := sdktranslator.FromString("gemini-cli")
 
-	originalPayloadSource := req.Payload
-	if len(opts.OriginalRequest) > 0 {
-		originalPayloadSource = opts.OriginalRequest
-	}
+	originalPayloadSource := originalRequestOr(opts, req.Payload)
 	originalPayload := originalPayloadSource
 	originalTranslated := sdktranslator.TranslateRequest(from, to, baseModel, originalPayload, true)
 	basePayload := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, true)
@@ -407,14 +401,14 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 						reporter.Publish(ctx, detail)
 					}
 					if bytes.HasPrefix(line, dataTag) {
-						segments := sdktranslator.TranslateStream(respCtx, to, from, attemptModel, opts.OriginalRequest, reqBody, bytes.Clone(line), &param)
+						segments := sdktranslator.TranslateStream(respCtx, to, from, attemptModel, originalRequestBytes(opts), reqBody, bytes.Clone(line), &param)
 						for i := range segments {
 							out <- cliproxyexecutor.StreamChunk{Payload: segments[i]}
 						}
 					}
 				}
 
-				segments := sdktranslator.TranslateStream(respCtx, to, from, attemptModel, opts.OriginalRequest, reqBody, []byte("[DONE]"), &param)
+				segments := sdktranslator.TranslateStream(respCtx, to, from, attemptModel, originalRequestBytes(opts), reqBody, []byte("[DONE]"), &param)
 				for i := range segments {
 					out <- cliproxyexecutor.StreamChunk{Payload: segments[i]}
 				}
@@ -436,12 +430,12 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 			helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 			reporter.Publish(ctx, helps.ParseGeminiCLIUsage(data))
 			var param any
-			segments := sdktranslator.TranslateStream(respCtx, to, from, attemptModel, opts.OriginalRequest, reqBody, data, &param)
+			segments := sdktranslator.TranslateStream(respCtx, to, from, attemptModel, originalRequestBytes(opts), reqBody, data, &param)
 			for i := range segments {
 				out <- cliproxyexecutor.StreamChunk{Payload: segments[i]}
 			}
 
-			segments = sdktranslator.TranslateStream(respCtx, to, from, attemptModel, opts.OriginalRequest, reqBody, []byte("[DONE]"), &param)
+			segments = sdktranslator.TranslateStream(respCtx, to, from, attemptModel, originalRequestBytes(opts), reqBody, []byte("[DONE]"), &param)
 			for i := range segments {
 				out <- cliproxyexecutor.StreamChunk{Payload: segments[i]}
 			}

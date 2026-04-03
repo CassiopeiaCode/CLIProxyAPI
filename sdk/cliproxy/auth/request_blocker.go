@@ -99,6 +99,6 @@ func requestBodyHashFromOptions(opts cliproxyexecutor.Options) (cliproxyexecutor
 	if ok && analysis != nil && analysis.requestHash != "" {
 		return updated, analysis.requestHash, true
 	}
-	hash, ok := requestBodyHash(opts.OriginalRequest)
+	hash, ok := requestBodyHash(opts.OriginalRequestOr(nil))
 	return updated, hash, ok
 }

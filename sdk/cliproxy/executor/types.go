@@ -47,6 +47,8 @@ type Options struct {
 	Query url.Values
 	// OriginalRequest preserves the inbound request bytes prior to translation.
 	OriginalRequest []byte
+	// OriginalRequestBody stores the inbound request body outside the hot path when needed.
+	OriginalRequestBody *OriginalRequestBody
 	// SourceFormat identifies the inbound schema.
 	SourceFormat sdktranslator.Format
 	// Metadata carries extra execution hints shared across selection and executors.

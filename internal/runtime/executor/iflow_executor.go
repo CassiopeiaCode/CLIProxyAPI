@@ -318,6 +318,9 @@ func (e *IFlowExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*
 	if auth == nil {
 		return nil, fmt.Errorf("iflow executor: auth is nil")
 	}
+	if updated, skipped := skipRefreshWhenDisabled(e.cfg, "iflow", auth); skipped {
+		return updated, nil
+	}
 
 	// Check if this is cookie-based authentication
 	var cookie string

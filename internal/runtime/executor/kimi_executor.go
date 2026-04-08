@@ -437,6 +437,9 @@ func (e *KimiExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*c
 	if auth == nil {
 		return nil, fmt.Errorf("kimi executor: auth is nil")
 	}
+	if updated, skipped := skipRefreshWhenDisabled(e.cfg, "kimi", auth); skipped {
+		return updated, nil
+	}
 	// Expect refresh_token in metadata for OAuth-based accounts
 	var refreshToken string
 	if auth.Metadata != nil {

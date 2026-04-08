@@ -718,12 +718,7 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 	log.Info("file watcher started for config and auth directory changes")
 
-	// Prefer core auth manager auto refresh if available.
-	if s.coreManager != nil {
-		interval := 15 * time.Minute
-		s.coreManager.StartAutoRefresh(context.Background(), interval)
-		log.Infof("core auth auto-refresh started (interval=%s)", interval)
-	}
+	s.startCoreAuthAutoRefresh()
 
 	select {
 	case <-ctx.Done():
@@ -732,6 +727,20 @@ func (s *Service) Run(ctx context.Context) error {
 	case err = <-s.serverErr:
 		return err
 	}
+}
+
+func (s *Service) startCoreAuthAutoRefresh() bool {
+	if s == nil || s.coreManager == nil {
+		return false
+	}
+	if s.cfg != nil && !s.cfg.AuthRefreshEnabled() {
+		log.Info("core auth auto-refresh disabled by config")
+		return false
+	}
+	interval := 15 * time.Minute
+	s.coreManager.StartAutoRefresh(context.Background(), interval)
+	log.Infof("core auth auto-refresh started (interval=%s)", interval)
+	return true
 }
 
 // Shutdown gracefully stops background workers and the HTTP server.

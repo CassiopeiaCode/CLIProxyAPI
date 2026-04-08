@@ -1608,6 +1608,9 @@ func (e *AntigravityExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Au
 	if auth == nil {
 		return auth, nil
 	}
+	if updated, skipped := skipRefreshWhenDisabled(e.cfg, "antigravity", auth); skipped {
+		return updated, nil
+	}
 	updated, errRefresh := e.refreshToken(ctx, auth.Clone())
 	if errRefresh != nil {
 		return nil, errRefresh
@@ -1784,6 +1787,9 @@ func (e *AntigravityExecutor) ensureAccessToken(ctx context.Context, auth *clipr
 	expiry := tokenExpiry(auth.Metadata)
 	if accessToken != "" && expiry.After(time.Now().Add(refreshSkew)) {
 		return accessToken, nil, nil
+	}
+	if !authRefreshEnabled(e.cfg) {
+		return "", nil, statusErr{code: http.StatusUnauthorized, msg: "auth refresh disabled by config"}
 	}
 	refreshCtx := context.Background()
 	if ctx != nil {

@@ -3187,6 +3187,9 @@ func (m *Manager) shouldRefresh(a *Auth, now time.Time) bool {
 	if a == nil || a.Disabled {
 		return false
 	}
+	if cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config); cfg != nil && !cfg.AuthRefreshEnabled() {
+		return false
+	}
 	if !a.NextRefreshAfter.IsZero() && now.Before(a.NextRefreshAfter) {
 		return false
 	}
@@ -3410,6 +3413,9 @@ func (m *Manager) markRefreshPending(id string, now time.Time) bool {
 func (m *Manager) refreshAuth(ctx context.Context, id string) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if cfg, _ := m.runtimeConfig.Load().(*internalconfig.Config); cfg != nil && !cfg.AuthRefreshEnabled() {
+		return
 	}
 	m.mu.RLock()
 	auth := m.auths[id]

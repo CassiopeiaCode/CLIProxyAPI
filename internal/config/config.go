@@ -41,6 +41,12 @@ type Config struct {
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 
+	// DisableAuthRefresh disables proactive auth refresh for the entire instance.
+	// When true, the service does not start background auth auto-refresh and executors
+	// do not exchange refresh tokens for new access tokens. This is intended for
+	// passive/follower deployments that mirror auth files from another instance.
+	DisableAuthRefresh bool `yaml:"disable-auth-refresh" json:"disable-auth-refresh"`
+
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
 
@@ -184,6 +190,12 @@ type RemoteManagement struct {
 	// PanelGitHubRepository overrides the GitHub repository used to fetch the management panel asset.
 	// Accepts either a repository URL (https://github.com/org/repo) or an API releases endpoint.
 	PanelGitHubRepository string `yaml:"panel-github-repository"`
+}
+
+// AuthRefreshEnabled reports whether this instance should proactively refresh auth tokens.
+// Nil configs default to enabled to preserve legacy behavior.
+func (cfg *Config) AuthRefreshEnabled() bool {
+	return cfg == nil || !cfg.DisableAuthRefresh
 }
 
 // QuotaExceeded defines the behavior when API quota limits are exceeded.

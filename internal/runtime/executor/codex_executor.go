@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -230,28 +231,30 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 	helps.AppendAPIResponseChunk(ctx, e.cfg, data)
 
 	lines := bytes.Split(data, []byte("\n"))
+	outputItemsByIndex := make(map[int64][]byte)
+	var outputItemsFallback [][]byte
 	for _, line := range lines {
 		if !bytes.HasPrefix(line, dataTag) {
 			continue
 		}
-
-			line = bytes.TrimSpace(line[5:])
-			if gjson.GetBytes(line, "type").String() != "response.completed" {
-				continue
-			}
-
-			if detail, ok := helps.ParseCodexUsage(line); ok {
+		eventData := bytes.TrimSpace(line[5:])
+		switch gjson.GetBytes(eventData, "type").String() {
+		case "response.output_item.done":
+			collectCodexOutputItemDone(eventData, outputItemsByIndex, &outputItemsFallback)
+		case "response.completed":
+			if detail, ok := helps.ParseCodexUsage(eventData); ok {
 				reporter.Publish(ctx, detail)
 			}
-
+			completedData := patchCodexCompletedOutput(eventData, outputItemsByIndex, outputItemsFallback)
 			var param any
-			out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, originalPayload, body, line, &param)
+			out := sdktranslator.TranslateNonStream(ctx, to, from, req.Model, originalPayload, body, completedData, &param)
 			resp = cliproxyexecutor.Response{Payload: out, Headers: httpResp.Header.Clone()}
 			return resp, nil
 		}
-		err = statusErr{code: 408, msg: "stream error: stream disconnected before completion: stream closed before response.completed"}
-		return resp, err
 	}
+	err = statusErr{code: 408, msg: "stream error: stream disconnected before completion: stream closed before response.completed"}
+	return resp, err
+}
 
 func (e *CodexExecutor) executeCompact(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (resp cliproxyexecutor.Response, err error) {
 	baseModel := thinking.ParseSuffix(req.Model).ModelName

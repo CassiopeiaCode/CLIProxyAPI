@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
@@ -251,6 +252,17 @@ type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
 	// Supported values: "round-robin" (default), "fill-first", "success-rate", "simhash".
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+
+	// ClaudeCodeSessionAffinity toggles session-affinity routing for Claude Code requests.
+	// This is kept for backwards compatibility; new configs should use SessionAffinity.
+	ClaudeCodeSessionAffinity bool `yaml:"claude-code-session-affinity" json:"claude-code-session-affinity"`
+
+	// SessionAffinity toggles universal session-affinity routing (all channels).
+	SessionAffinity bool `yaml:"session-affinity" json:"session-affinity"`
+
+	// SessionAffinityTTL is the stickiness TTL. Empty means default behavior.
+	// Examples: "5m", "1h".
+	SessionAffinityTTL string `yaml:"session-affinity-ttl" json:"session-affinity-ttl"`
 
 	// SuccessRate configures the "success-rate" routing strategy.
 	SuccessRate RoutingSuccessRateConfig `yaml:"success-rate" json:"success-rate"`
@@ -593,6 +605,10 @@ type OpenAICompatibilityModel struct {
 
 	// Alias is the model name alias that clients will use to reference this model.
 	Alias string `yaml:"alias" json:"alias"`
+
+	// Thinking optionally describes the model's supported internal reasoning budget.
+	// When unset, the server may infer a default or omit it from model info.
+	Thinking *registry.ThinkingSupport `yaml:"thinking,omitempty" json:"thinking,omitempty"`
 }
 
 func (m OpenAICompatibilityModel) GetName() string  { return m.Name }

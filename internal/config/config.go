@@ -47,6 +47,10 @@ type Config struct {
 	// passive/follower deployments that mirror auth files from another instance.
 	DisableAuthRefresh bool `yaml:"disable-auth-refresh" json:"disable-auth-refresh"`
 
+	// AuthAutoRefreshWorkers controls the maximum concurrency of background auth refresh.
+	// Zero uses the built-in default.
+	AuthAutoRefreshWorkers int `yaml:"auth-auto-refresh-workers" json:"auth-auto-refresh-workers"`
+
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
 
@@ -187,6 +191,8 @@ type RemoteManagement struct {
 	SecretKey string `yaml:"secret-key"`
 	// DisableControlPanel skips serving and syncing the bundled management UI when true.
 	DisableControlPanel bool `yaml:"disable-control-panel"`
+	// DisableAutoUpdatePanel disables the management UI auto-update job.
+	DisableAutoUpdatePanel bool `yaml:"disable-auto-update-panel"`
 	// PanelGitHubRepository overrides the GitHub repository used to fetch the management panel asset.
 	// Accepts either a repository URL (https://github.com/org/repo) or an API releases endpoint.
 	PanelGitHubRepository string `yaml:"panel-github-repository"`

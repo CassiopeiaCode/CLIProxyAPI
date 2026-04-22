@@ -144,6 +144,16 @@ type ClaudeHeaderDefaults struct {
 	PackageVersion string `yaml:"package-version" json:"package-version"`
 	RuntimeVersion string `yaml:"runtime-version" json:"runtime-version"`
 	Timeout        string `yaml:"timeout" json:"timeout"`
+
+	// StabilizeDeviceProfile enables caching/pinning of Claude device fingerprint headers
+	// to reduce upstream auth invalidation due to fluctuating platform signals.
+	// Nil means disabled (legacy default).
+	StabilizeDeviceProfile *bool `yaml:"stabilize-device-profile" json:"stabilize-device-profile"`
+
+	// OS and Arch override the baseline platform used when stabilizing the device profile.
+	// When empty, defaults are selected in executor helpers.
+	OS   string `yaml:"os" json:"os"`
+	Arch string `yaml:"arch" json:"arch"`
 }
 
 // TLSConfig holds HTTPS server settings.
@@ -212,6 +222,9 @@ type QuotaExceeded struct {
 
 	// SwitchPreviewModel indicates whether to automatically switch to a preview model when a quota is exceeded.
 	SwitchPreviewModel bool `yaml:"switch-preview-model" json:"switch-preview-model"`
+
+	// AntigravityCredits indicates whether to switch projects when Antigravity credits are exhausted.
+	AntigravityCredits bool `yaml:"antigravity-credits" json:"antigravity-credits"`
 }
 
 // RoutingConfig configures how credentials are selected for requests.

@@ -51,6 +51,14 @@ type Config struct {
 	// Zero uses the built-in default.
 	AuthAutoRefreshWorkers int `yaml:"auth-auto-refresh-workers" json:"auth-auto-refresh-workers"`
 
+	// AntigravitySignatureCacheEnabled toggles the antigravity signature cache.
+	// Nil means enabled (default).
+	AntigravitySignatureCacheEnabled *bool `yaml:"antigravity-signature-cache-enabled" json:"antigravity-signature-cache-enabled"`
+
+	// AntigravitySignatureBypassStrict toggles strict mode for the signature cache bypass.
+	// Nil means disabled (default).
+	AntigravitySignatureBypassStrict *bool `yaml:"antigravity-signature-bypass-strict" json:"antigravity-signature-bypass-strict"`
+
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
 
@@ -110,6 +118,10 @@ type Config struct {
 	// These are used as fallbacks when the client does not send its own headers.
 	ClaudeHeaderDefaults ClaudeHeaderDefaults `yaml:"claude-header-defaults" json:"claude-header-defaults"`
 
+	// CodexHeaderDefaults configures default header values for Codex API requests.
+	// These are used as fallbacks when the client does not send its own headers.
+	CodexHeaderDefaults CodexHeaderDefaults `yaml:"codex-header-defaults" json:"codex-header-defaults"`
+
 	// OpenAICompatibility defines OpenAI API compatibility configurations for external providers.
 	OpenAICompatibility []OpenAICompatibility `yaml:"openai-compatibility" json:"openai-compatibility"`
 
@@ -154,6 +166,13 @@ type ClaudeHeaderDefaults struct {
 	// When empty, defaults are selected in executor helpers.
 	OS   string `yaml:"os" json:"os"`
 	Arch string `yaml:"arch" json:"arch"`
+}
+
+// CodexHeaderDefaults configures default header values injected into Codex requests
+// when the client does not send them.
+type CodexHeaderDefaults struct {
+	UserAgent    string `yaml:"user-agent" json:"user-agent"`
+	BetaFeatures string `yaml:"beta-features" json:"beta-features"`
 }
 
 // TLSConfig holds HTTPS server settings.
@@ -419,6 +438,9 @@ type ClaudeKey struct {
 
 	// Cloak configures request cloaking for non-Claude-Code clients.
 	Cloak *CloakConfig `yaml:"cloak,omitempty" json:"cloak,omitempty"`
+
+	// ExperimentalCCHSigning enables signing Anthropic billing-header CCH fields for this key.
+	ExperimentalCCHSigning bool `yaml:"experimental-cch-signing" json:"experimental-cch-signing"`
 }
 
 func (k ClaudeKey) GetAPIKey() string  { return k.APIKey }

@@ -165,6 +165,12 @@ func TestCodexExecutorGoalFirstInjectsHardcodedInstructions(t *testing.T) {
 	if !strings.Contains(firstText, "<objective>\nship the stack\n</objective>") {
 		t.Fatalf("expected extracted objective in injected goal context, got %q", firstText)
 	}
+	if !strings.Contains(firstText, "Progress visibility:") {
+		t.Fatalf("expected native progress visibility section in injected goal context, got %q", firstText)
+	}
+	if !strings.Contains(firstText, "Blocked audit:") {
+		t.Fatalf("expected native blocked audit section in injected goal context, got %q", firstText)
+	}
 }
 
 func TestCodexExecutorGoalFirstReusesSessionObjective(t *testing.T) {
@@ -213,6 +219,9 @@ func TestCodexExecutorGoalFirstReusesSessionObjective(t *testing.T) {
 	if !strings.Contains(secondText, "<objective>\nkeep the benchmark green\n</objective>") {
 		t.Fatalf("expected cached objective in second goal context, got %q", secondText)
 	}
+	if !strings.Contains(secondText, "Token budget: none") {
+		t.Fatalf("expected native budget section in cached goal context, got %q", secondText)
+	}
 }
 
 func TestCodexExecutorGoalFirstInjectsFallbackObjectiveWithoutGoalText(t *testing.T) {
@@ -249,6 +258,9 @@ func TestCodexExecutorGoalFirstInjectsFallbackObjectiveWithoutGoalText(t *testin
 	}
 	if !strings.Contains(firstText, "<objective>\nContinue pursuing the active thread goal from earlier turns.\n</objective>") {
 		t.Fatalf("expected fallback objective in injected goal context, got %q", firstText)
+	}
+	if !strings.Contains(firstText, "Do not call update_goal unless the goal is complete or the strict blocked audit above is satisfied.") {
+		t.Fatalf("expected native completion/blocked footer in injected goal context, got %q", firstText)
 	}
 }
 

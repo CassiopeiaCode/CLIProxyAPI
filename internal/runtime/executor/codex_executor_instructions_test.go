@@ -154,12 +154,16 @@ func TestCodexExecutorGoalFirstInjectsHardcodedInstructions(t *testing.T) {
 		t.Fatalf("Execute error: %v", err)
 	}
 
-	instructions := gjson.GetBytes(gotBody, "instructions").String()
-	if !strings.Contains(instructions, "<cli-proxy-api-goalfirst>") {
-		t.Fatalf("expected hardcoded goalfirst marker in instructions, got %q", instructions)
+	input := gjson.GetBytes(gotBody, "input")
+	if !input.IsArray() {
+		t.Fatalf("expected input array after goal injection, got %s", string(gotBody))
 	}
-	if !strings.Contains(instructions, "<objective>\nship the stack\n</objective>") {
-		t.Fatalf("expected extracted objective in injected instructions, got %q", instructions)
+	firstText := input.Array()[0].Get("content.0.text").String()
+	if !strings.Contains(firstText, "<goal_context>") {
+		t.Fatalf("expected goal_context wrapper in first input item, got %q", firstText)
+	}
+	if !strings.Contains(firstText, "<objective>\nship the stack\n</objective>") {
+		t.Fatalf("expected extracted objective in injected goal context, got %q", firstText)
 	}
 }
 
@@ -205,9 +209,9 @@ func TestCodexExecutorGoalFirstReusesSessionObjective(t *testing.T) {
 	if len(bodies) != 2 {
 		t.Fatalf("expected 2 requests, got %d", len(bodies))
 	}
-	secondInstructions := gjson.GetBytes(bodies[1], "instructions").String()
-	if !strings.Contains(secondInstructions, "<objective>\nkeep the benchmark green\n</objective>") {
-		t.Fatalf("expected cached objective in second injected instructions, got %q", secondInstructions)
+	secondText := gjson.GetBytes(bodies[1], "input.0.content.0.text").String()
+	if !strings.Contains(secondText, "<objective>\nkeep the benchmark green\n</objective>") {
+		t.Fatalf("expected cached objective in second goal context, got %q", secondText)
 	}
 }
 
@@ -239,12 +243,12 @@ func TestCodexExecutorGoalFirstInjectsFallbackObjectiveWithoutGoalText(t *testin
 		t.Fatalf("Execute error: %v", err)
 	}
 
-	instructions := gjson.GetBytes(gotBody, "instructions").String()
-	if !strings.Contains(instructions, "<cli-proxy-api-goalfirst>") {
-		t.Fatalf("expected hardcoded goalfirst marker in instructions, got %q", instructions)
+	firstText := gjson.GetBytes(gotBody, "input.0.content.0.text").String()
+	if !strings.Contains(firstText, "<goal_context>") {
+		t.Fatalf("expected goal_context wrapper in first input item, got %q", firstText)
 	}
-	if !strings.Contains(instructions, "<objective>\nContinue pursuing the active thread goal from earlier turns.\n</objective>") {
-		t.Fatalf("expected fallback objective in injected instructions, got %q", instructions)
+	if !strings.Contains(firstText, "<objective>\nContinue pursuing the active thread goal from earlier turns.\n</objective>") {
+		t.Fatalf("expected fallback objective in injected goal context, got %q", firstText)
 	}
 }
 
@@ -276,7 +280,7 @@ func TestCodexExecutorGoalFirstSkipsCompactRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute compact error: %v", err)
 	}
-	if strings.Contains(gjson.GetBytes(gotBody, "instructions").String(), "<cli-proxy-api-goalfirst>") {
+	if strings.Contains(string(gotBody), "<goal_context>") {
 		t.Fatalf("did not expect goalfirst instructions on compact request: %s", string(gotBody))
 	}
 }
@@ -308,7 +312,7 @@ func TestCodexExecutorGoalFirstSkipsCompactionTriggerRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if strings.Contains(gjson.GetBytes(gotBody, "instructions").String(), "<cli-proxy-api-goalfirst>") {
+	if strings.Contains(string(gotBody), "<goal_context>") {
 		t.Fatalf("did not expect goalfirst instructions on compaction_trigger request: %s", string(gotBody))
 	}
 }

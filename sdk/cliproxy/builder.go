@@ -253,24 +253,26 @@ func (b *Builder) Build() (*Service, error) {
 			selector = coreauth.NewSuccessRateSelector(b.cfg.Routing.SuccessRate.HalfLifeSeconds, b.cfg.Routing.SuccessRate.ExploreRate)
 		case "simhash", "sh":
 			selector = coreauth.NewSimHashSelector(b.cfg.Routing.SimHash)
+		case "goalfirst", "goal-first", "gf":
+			selector = coreauth.NewGoalFirstSelector()
 		default:
 			selector = &coreauth.RoundRobinSelector{}
 		}
 
-			// Wrap with session affinity if enabled (failover is always on).
-			if sessionAffinity {
-				selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
-					Fallback: selector,
-					TTL:      sessionAffinityTTL,
-				})
-			}
-
-			var hook coreauth.Hook
-			if auditHook := audit.NewHook(&b.cfg.RequestAudit); auditHook != nil {
-				hook = &requestAuditHook{sink: auditHook}
-			}
-			coreManager = coreauth.NewManager(tokenStore, selector, hook)
+		// Wrap with session affinity if enabled (failover is always on).
+		if sessionAffinity {
+			selector = coreauth.NewSessionAffinitySelectorWithConfig(coreauth.SessionAffinityConfig{
+				Fallback: selector,
+				TTL:      sessionAffinityTTL,
+			})
 		}
+
+		var hook coreauth.Hook
+		if auditHook := audit.NewHook(&b.cfg.RequestAudit); auditHook != nil {
+			hook = &requestAuditHook{sink: auditHook}
+		}
+		coreManager = coreauth.NewManager(tokenStore, selector, hook)
+	}
 	// Attach a default RoundTripper provider so providers can opt-in per-auth transports.
 	coreManager.SetRoundTripperProvider(newDefaultRoundTripperProvider())
 	coreManager.SetConfig(b.cfg)

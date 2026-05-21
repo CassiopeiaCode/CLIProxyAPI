@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
@@ -119,5 +120,195 @@ func TestCodexExecutorCountTokensTreatsNullInstructionsAsEmpty(t *testing.T) {
 
 	if string(nullResp.Payload) != string(emptyResp.Payload) {
 		t.Fatalf("token count payload mismatch:\nnull=%s\nempty=%s", string(nullResp.Payload), string(emptyResp.Payload))
+	}
+}
+
+func TestCodexExecutorGoalFirstInjectsHardcodedInstructions(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":0,\"status\":\"completed\",\"background\":false,\"error\":null}}\n\n"))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{
+		Routing: config.RoutingConfig{Strategy: "goalfirst"},
+	})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL,
+		"api_key":  "test",
+	}}
+
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "gpt-5.4",
+		Payload: []byte(`{"model":"gpt-5.4","instructions":"base","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"Continue working toward the active thread goal.\n\n<objective>\nship the stack\n</objective>"}]}]}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai-response"),
+		Metadata: map[string]any{
+			cliproxyexecutor.ExecutionSessionMetadataKey: "session-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	instructions := gjson.GetBytes(gotBody, "instructions").String()
+	if !strings.Contains(instructions, "<cli-proxy-api-goalfirst>") {
+		t.Fatalf("expected hardcoded goalfirst marker in instructions, got %q", instructions)
+	}
+	if !strings.Contains(instructions, "<objective>\nship the stack\n</objective>") {
+		t.Fatalf("expected extracted objective in injected instructions, got %q", instructions)
+	}
+}
+
+func TestCodexExecutorGoalFirstReusesSessionObjective(t *testing.T) {
+	var bodies [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":0,\"status\":\"completed\",\"background\":false,\"error\":null}}\n\n"))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{
+		Routing: config.RoutingConfig{Strategy: "goalfirst"},
+	})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL,
+		"api_key":  "test",
+	}}
+	opts := cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai-response"),
+		Metadata: map[string]any{
+			cliproxyexecutor.ExecutionSessionMetadataKey: "session-2",
+		},
+	}
+
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "gpt-5.4",
+		Payload: []byte(`{"model":"gpt-5.4","instructions":"","input":[{"type":"message","role":"developer","content":[{"type":"input_text","text":"<objective>\nkeep the benchmark green\n</objective>"}]}]}`),
+	}, opts)
+	if err != nil {
+		t.Fatalf("Execute first error: %v", err)
+	}
+
+	_, err = executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "gpt-5.4",
+		Payload: []byte(`{"model":"gpt-5.4","instructions":"","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`),
+	}, opts)
+	if err != nil {
+		t.Fatalf("Execute second error: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected 2 requests, got %d", len(bodies))
+	}
+	secondInstructions := gjson.GetBytes(bodies[1], "instructions").String()
+	if !strings.Contains(secondInstructions, "<objective>\nkeep the benchmark green\n</objective>") {
+		t.Fatalf("expected cached objective in second injected instructions, got %q", secondInstructions)
+	}
+}
+
+func TestCodexExecutorGoalFirstInjectsFallbackObjectiveWithoutGoalText(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":0,\"status\":\"completed\",\"background\":false,\"error\":null}}\n\n"))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{
+		Routing: config.RoutingConfig{Strategy: "goalfirst"},
+	})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL,
+		"api_key":  "test",
+	}}
+
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "gpt-5.4",
+		Payload: []byte(`{"model":"gpt-5.4","instructions":"","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai-response"),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	instructions := gjson.GetBytes(gotBody, "instructions").String()
+	if !strings.Contains(instructions, "<cli-proxy-api-goalfirst>") {
+		t.Fatalf("expected hardcoded goalfirst marker in instructions, got %q", instructions)
+	}
+	if !strings.Contains(instructions, "<objective>\nContinue pursuing the active thread goal from earlier turns.\n</objective>") {
+		t.Fatalf("expected fallback objective in injected instructions, got %q", instructions)
+	}
+}
+
+func TestCodexExecutorGoalFirstSkipsCompactRequests(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response.compaction","usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}`))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{
+		Routing: config.RoutingConfig{Strategy: "goalfirst"},
+	})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL,
+		"api_key":  "test",
+	}}
+
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "gpt-5.4",
+		Payload: []byte(`{"model":"gpt-5.4","instructions":"","input":"hello"}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai-response"),
+		Alt:          "responses/compact",
+	})
+	if err != nil {
+		t.Fatalf("Execute compact error: %v", err)
+	}
+	if strings.Contains(gjson.GetBytes(gotBody, "instructions").String(), "<cli-proxy-api-goalfirst>") {
+		t.Fatalf("did not expect goalfirst instructions on compact request: %s", string(gotBody))
+	}
+}
+
+func TestCodexExecutorGoalFirstSkipsCompactionTriggerRequests(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		gotBody = body
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"object\":\"response\",\"created_at\":0,\"status\":\"completed\",\"background\":false,\"error\":null}}\n\n"))
+	}))
+	defer server.Close()
+
+	executor := NewCodexExecutor(&config.Config{
+		Routing: config.RoutingConfig{Strategy: "goalfirst"},
+	})
+	auth := &cliproxyauth.Auth{Attributes: map[string]string{
+		"base_url": server.URL,
+		"api_key":  "test",
+	}}
+
+	_, err := executor.Execute(context.Background(), auth, cliproxyexecutor.Request{
+		Model:   "gpt-5.4",
+		Payload: []byte(`{"model":"gpt-5.4","instructions":"","input":[{"type":"compaction_trigger"}]}`),
+	}, cliproxyexecutor.Options{
+		SourceFormat: sdktranslator.FromString("openai-response"),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if strings.Contains(gjson.GetBytes(gotBody, "instructions").String(), "<cli-proxy-api-goalfirst>") {
+		t.Fatalf("did not expect goalfirst instructions on compaction_trigger request: %s", string(gotBody))
 	}
 }

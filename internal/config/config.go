@@ -250,7 +250,7 @@ type QuotaExceeded struct {
 // RoutingConfig configures how credentials are selected for requests.
 type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
-	// Supported values: "round-robin" (default), "fill-first", "success-rate", "simhash".
+	// Supported values: "round-robin" (default), "fill-first", "success-rate", "simhash", "goalfirst".
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
 
 	// ClaudeCodeSessionAffinity toggles session-affinity routing for Claude Code requests.

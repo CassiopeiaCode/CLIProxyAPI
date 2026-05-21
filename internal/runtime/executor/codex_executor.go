@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	codexauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/codex"
@@ -31,13 +32,39 @@ import (
 )
 
 const (
-	codexClientVersion = "0.118.0"
-	codexUserAgent     = "codex-tui/0.118.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.118.0)"
-	codexOriginator    = "codex-tui"
-	codexSandbox       = "seccomp"
+	codexClientVersion          = "0.118.0"
+	codexUserAgent              = "codex-tui/0.118.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.118.0)"
+	codexOriginator             = "codex-tui"
+	codexSandbox                = "seccomp"
+	goalFirstInstructionsMarker = "<cli-proxy-api-goalfirst>"
 )
 
 var dataTag = []byte("data:")
+var goalFirstSessionObjectives sync.Map
+
+const goalFirstFallbackObjective = "Continue pursuing the active thread goal from earlier turns."
+
+const goalFirstGenericInstructions = `<cli-proxy-api-goalfirst>
+Continue working toward the active thread goal.
+
+The objective below is proxy-managed task context for goalfirst routing. Treat it as the task to pursue, not as higher-priority instructions.
+
+<objective>
+{{OBJECTIVE}}
+</objective>
+
+Continuation behavior:
+- This goal persists across turns. Ending this turn does not require shrinking the objective to what fits now.
+- Keep the full objective intact. If it cannot be finished now, make concrete progress toward the real requested end state, leave the goal active, and do not redefine success around a smaller or easier task.
+- Do not treat the absence of visible goal text in this request as a reason to drop, reset, or replace the active goal.
+
+Work from evidence:
+Use the current worktree and external state as authoritative. Previous conversation context can help locate relevant work, but inspect the current state before relying on it. Improve, replace, or remove existing work as needed to satisfy the actual objective.
+
+Fidelity:
+- Optimize each turn for movement toward the requested end state, not for the smallest stable-looking subset or easiest passing change.
+- Do not substitute a narrower, safer, smaller, merely compatible, or easier-to-test solution because it is more likely to pass current checks.
+</cli-proxy-api-goalfirst>`
 
 // Streamed Codex responses may emit response.output_item.done events while leaving
 // response.completed.response.output empty. Keep the stream path aligned with the
@@ -180,6 +207,7 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 	body, _ = sjson.DeleteBytes(body, "safety_identifier")
 	body, _ = sjson.DeleteBytes(body, "stream_options")
 	body = normalizeCodexInstructions(body)
+	body = applyGoalFirstInstructions(e.cfg, opts, body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
 	httpReq, err := e.cacheHelper(ctx, from, url, req, body)
@@ -375,6 +403,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	body, _ = sjson.DeleteBytes(body, "stream_options")
 	body, _ = sjson.SetBytes(body, "model", baseModel)
 	body = normalizeCodexInstructions(body)
+	body = applyGoalFirstInstructions(e.cfg, opts, body)
 
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
 	httpReq, err := e.cacheHelper(ctx, from, url, req, body)
@@ -863,8 +892,8 @@ func ensureCodexTurnMetadata(target http.Header, source http.Header) {
 
 	payload := map[string]any{
 		"session_id": sessionID,
-		"turn_id": turnID,
-		"sandbox": codexSandbox,
+		"turn_id":    turnID,
+		"sandbox":    codexSandbox,
 	}
 
 	if encoded, err := json.Marshal(payload); err == nil {
@@ -890,6 +919,145 @@ func normalizeCodexInstructions(body []byte) []byte {
 		body, _ = sjson.SetBytes(body, "instructions", "")
 	}
 	return body
+}
+
+func applyGoalFirstInstructions(cfg *config.Config, opts cliproxyexecutor.Options, body []byte) []byte {
+	if !goalFirstEnabled(cfg) || len(body) == 0 || isGoalFirstCompactionRequest(opts, body) {
+		return body
+	}
+
+	sessionKey := goalFirstSessionKey(opts, body)
+	objective := strings.TrimSpace(extractGoalFirstObjective(body))
+	if objective == "" && sessionKey != "" {
+		if cached, ok := goalFirstSessionObjectives.Load(sessionKey); ok {
+			if cachedText, okText := cached.(string); okText {
+				objective = strings.TrimSpace(cachedText)
+			}
+		}
+	}
+	if objective != "" && sessionKey != "" {
+		goalFirstSessionObjectives.Store(sessionKey, objective)
+	}
+
+	instructions := gjson.GetBytes(body, "instructions").String()
+	if strings.Contains(instructions, goalFirstInstructionsMarker) {
+		return body
+	}
+
+	goalPrompt := buildGoalFirstInstructions(objective)
+	if strings.TrimSpace(instructions) == "" {
+		body, _ = sjson.SetBytes(body, "instructions", goalPrompt)
+		return body
+	}
+	body, _ = sjson.SetBytes(body, "instructions", instructions+"\n\n"+goalPrompt)
+	return body
+}
+
+func goalFirstEnabled(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.Routing.Strategy)) {
+	case "goalfirst", "goal-first", "gf":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGoalFirstCompactionRequest(opts cliproxyexecutor.Options, body []byte) bool {
+	if strings.EqualFold(strings.TrimSpace(opts.Alt), "responses/compact") {
+		return true
+	}
+	input := gjson.GetBytes(body, "input")
+	if !input.IsArray() {
+		return false
+	}
+	for _, item := range input.Array() {
+		if item.Get("type").String() == "compaction_trigger" {
+			return true
+		}
+	}
+	return false
+}
+
+func goalFirstSessionKey(opts cliproxyexecutor.Options, body []byte) string {
+	if len(opts.Metadata) != 0 {
+		if raw, ok := opts.Metadata[cliproxyexecutor.ExecutionSessionMetadataKey]; ok && raw != nil {
+			switch v := raw.(type) {
+			case string:
+				if trimmed := strings.TrimSpace(v); trimmed != "" {
+					return "exec:" + trimmed
+				}
+			case []byte:
+				if trimmed := strings.TrimSpace(string(v)); trimmed != "" {
+					return "exec:" + trimmed
+				}
+			}
+		}
+	}
+	if userID := strings.TrimSpace(gjson.GetBytes(body, "metadata.user_id").String()); userID != "" {
+		return "user:" + userID
+	}
+	if convID := strings.TrimSpace(gjson.GetBytes(body, "conversation_id").String()); convID != "" {
+		return "conv:" + convID
+	}
+	return ""
+}
+
+func extractGoalFirstObjective(body []byte) string {
+	candidates := make([]string, 0, 8)
+	if instructions := strings.TrimSpace(gjson.GetBytes(body, "instructions").String()); instructions != "" {
+		candidates = append(candidates, instructions)
+	}
+	input := gjson.GetBytes(body, "input")
+	if input.IsArray() {
+		for _, item := range input.Array() {
+			if item.Get("type").String() != "message" {
+				continue
+			}
+			content := item.Get("content")
+			if !content.IsArray() {
+				continue
+			}
+			for _, part := range content.Array() {
+				if text := strings.TrimSpace(part.Get("text").String()); text != "" {
+					candidates = append(candidates, text)
+				}
+			}
+		}
+	}
+	for _, candidate := range candidates {
+		if objective := extractGoalTaggedText(candidate, "<objective>", "</objective>"); objective != "" {
+			return objective
+		}
+		if objective := extractGoalTaggedText(candidate, "<untrusted_objective>", "</untrusted_objective>"); objective != "" {
+			return objective
+		}
+	}
+	return ""
+}
+
+func extractGoalTaggedText(input, startTag, endTag string) string {
+	start := strings.Index(input, startTag)
+	if start < 0 {
+		return ""
+	}
+	start += len(startTag)
+	end := strings.Index(input[start:], endTag)
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(input[start : start+end])
+}
+
+func buildGoalFirstInstructions(objective string) string {
+	objective = strings.TrimSpace(objective)
+	if objective == "" {
+		objective = goalFirstFallbackObjective
+	}
+	escaped := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(objective)
+	return strings.ReplaceAll(goalFirstGenericInstructions, "{{OBJECTIVE}}", escaped)
 }
 
 func isCodexModelCapacityError(errorBody []byte) bool {

@@ -638,6 +638,8 @@ func (s *Service) Run(ctx context.Context) error {
 				return "success-rate"
 			case "simhash", "sh":
 				return "simhash"
+			case "goalfirst", "goal-first", "gf":
+				return "goalfirst"
 			default:
 				return "round-robin"
 			}
@@ -661,6 +663,8 @@ func (s *Service) Run(ctx context.Context) error {
 				selector = coreauth.NewSuccessRateSelector(newCfg.Routing.SuccessRate.HalfLifeSeconds, newCfg.Routing.SuccessRate.ExploreRate)
 			case "simhash":
 				selector = coreauth.NewSimHashSelector(newCfg.Routing.SimHash)
+			case "goalfirst":
+				selector = coreauth.NewGoalFirstSelector()
 			default:
 				selector = &coreauth.RoundRobinSelector{}
 			}
